@@ -3926,10 +3926,22 @@ pub struct MemoryConfig {
     /// Minimum candidate count to trigger reranking.
     #[serde(default = "default_rerank_threshold")]
     pub rerank_threshold: usize,
-    /// Reranker server URL (e.g. "http://localhost:8787").
-    /// When set, uses an external cross-encoder reranker server.
+    /// Reranker server URL — supports any HTTP reranker endpoint:
+    /// - Local server: `"http://localhost:8787"`
+    /// - Jina AI: `"https://api.jina.ai/v1"`
+    /// - Cohere: `"https://api.cohere.com/v2"`
+    /// - Any OpenAI-compatible rerank endpoint
     #[serde(default)]
     pub rerank_url: Option<String>,
+    /// Reranker model name (e.g. `"bge-reranker-v2-m3"`, `"jina-reranker-v2-base-multilingual"`,
+    /// `"rerank-v3.5"`). Sent in the request body as `"model"`. Optional for
+    /// self-hosted servers that serve a single model.
+    #[serde(default)]
+    pub rerank_model: Option<String>,
+    /// API key for third-party reranker services (Jina, Cohere, etc.).
+    /// Sent as `Authorization: Bearer <key>`. Not needed for local servers.
+    #[serde(default)]
+    pub rerank_api_key: Option<String>,
     /// FTS score above which to early-return without vector search (0.0–1.0).
     #[serde(default = "default_fts_early_return_score")]
     pub fts_early_return_score: f64,
@@ -4081,6 +4093,8 @@ impl Default for MemoryConfig {
             rerank_enabled: false,
             rerank_threshold: default_rerank_threshold(),
             rerank_url: None,
+            rerank_model: None,
+            rerank_api_key: None,
             fts_early_return_score: default_fts_early_return_score(),
             default_namespace: default_namespace(),
             conflict_threshold: default_conflict_threshold(),

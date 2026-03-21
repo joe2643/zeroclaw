@@ -38,6 +38,10 @@ pub struct RetrievalConfig {
     pub rerank_threshold: usize,
     /// Reranker server URL (e.g. "http://localhost:8787").
     pub rerank_url: Option<String>,
+    /// Reranker model name (sent as `"model"` in request body).
+    pub rerank_model: Option<String>,
+    /// API key for third-party reranker services (sent as Bearer token).
+    pub rerank_api_key: Option<String>,
 }
 
 impl Default for RetrievalConfig {
@@ -50,6 +54,8 @@ impl Default for RetrievalConfig {
             rerank_enabled: false,
             rerank_threshold: 5,
             rerank_url: None,
+            rerank_model: None,
+            rerank_api_key: None,
         }
     }
 }
@@ -59,6 +65,23 @@ pub struct RetrievalPipeline {
     memory: Arc<dyn Memory>,
     config: RetrievalConfig,
     hot_cache: Mutex<HashMap<String, CachedResult>>,
+}
+
+impl RetrievalConfig {
+    /// Build a `RetrievalConfig` from the memory section of the main config.
+    pub fn from_memory_config(mc: &crate::config::MemoryConfig) -> Self {
+        Self {
+            stages: mc.retrieval_stages.clone(),
+            fts_early_return_score: mc.fts_early_return_score,
+            cache_max_entries: 256,
+            cache_ttl: Duration::from_secs(300),
+            rerank_enabled: mc.rerank_enabled,
+            rerank_threshold: mc.rerank_threshold,
+            rerank_url: mc.rerank_url.clone(),
+            rerank_model: mc.rerank_model.clone(),
+            rerank_api_key: mc.rerank_api_key.clone(),
+        }
+    }
 }
 
 impl RetrievalPipeline {
@@ -139,19 +162,27 @@ impl RetrievalPipeline {
             .map(|e| format!("{}: {}", e.key, e.content))
             .collect();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "query": query,
             "documents": documents,
         });
+        if let Some(model) = &self.config.rerank_model {
+            body["model"] = serde_json::Value::String(model.clone());
+        }
 
         let client = crate::config::build_runtime_proxy_client("memory.reranker");
         let rerank_endpoint = format!("{}/rerank", url.trim_end_matches('/'));
 
-        let resp = match client
+        let mut req = client
             .post(&rerank_endpoint)
             .header("Content-Type", "application/json")
             .json(&body)
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(10));
+        if let Some(api_key) = &self.config.rerank_api_key {
+            req = req.bearer_auth(api_key);
+        }
+
+        let resp = match req
             .send()
             .await
         {

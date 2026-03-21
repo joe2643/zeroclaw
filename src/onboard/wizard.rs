@@ -426,6 +426,8 @@ fn memory_config_defaults_for_backend(backend: &str) -> MemoryConfig {
         rerank_enabled: false,
         rerank_threshold: 5,
         rerank_url: None,
+        rerank_model: None,
+        rerank_api_key: None,
         fts_early_return_score: 0.85,
         default_namespace: "default".into(),
         conflict_threshold: 0.85,

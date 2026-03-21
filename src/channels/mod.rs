@@ -265,6 +265,7 @@ enum ChannelRuntimeCommand {
     ShowModel,
     SetModel(String),
     NewSession,
+    SetThinking(Option<bool>),
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -383,6 +384,10 @@ struct ChannelRuntimeContext {
     activated_tools: Option<std::sync::Arc<std::sync::Mutex<crate::tools::ActivatedToolSet>>>,
     cost_tracking: Option<ChannelCostTrackingState>,
     pacing: crate::config::PacingConfig,
+    /// Per-chat thinking/reasoning overrides (sender_key -> enabled).
+    /// `Some(true)` = force thinking on, `Some(false)` = force thinking off.
+    /// Missing key = use global default from `extra_request_body`.
+    thinking_overrides: Arc<Mutex<HashMap<String, bool>>>,
 }
 
 #[derive(Clone)]
@@ -783,6 +788,22 @@ fn parse_runtime_command(channel_name: &str, content: &str) -> Option<ChannelRun
             }
         }
         "/new" => Some(ChannelRuntimeCommand::NewSession),
+        "/thinking" => {
+            let arg = parts.next().unwrap_or("").to_ascii_lowercase();
+            match arg.as_str() {
+                "off" | "false" | "0" | "disable" | "no" => {
+                    Some(ChannelRuntimeCommand::SetThinking(Some(false)))
+                }
+                "on" | "true" | "1" | "enable" | "yes" => {
+                    Some(ChannelRuntimeCommand::SetThinking(Some(true)))
+                }
+                "reset" | "default" | "auto" => {
+                    Some(ChannelRuntimeCommand::SetThinking(None))
+                }
+                // No argument = show current status
+                _ => Some(ChannelRuntimeCommand::SetThinking(None)),
+            }
+        }
         _ => None,
     }
 }
@@ -1543,6 +1564,42 @@ async fn handle_runtime_command_if_needed(
             mark_sender_for_new_session(ctx, &sender_key);
             "Conversation history cleared. Starting fresh.".to_string()
         }
+        ChannelRuntimeCommand::SetThinking(override_value) => {
+            let mut overrides = ctx
+                .thinking_overrides
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            match override_value {
+                Some(enabled) => {
+                    overrides.insert(sender_key.clone(), enabled);
+                    if enabled {
+                        "\u{1F9E0} Thinking enabled for this chat. Reasoning models will use chain-of-thought (more accurate, uses more tokens).".to_string()
+                    } else {
+                        "\u{26A1} Thinking disabled for this chat. Responses will be faster and cheaper.".to_string()
+                    }
+                }
+                None => {
+                    let was_set = overrides.remove(&sender_key);
+                    let global_default = ctx
+                        .provider_runtime_options
+                        .extra_request_body
+                        .get("enable_thinking")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    if was_set.is_some() {
+                        format!(
+                            "Thinking reset to global default ({}).",
+                            if global_default { "on" } else { "off" }
+                        )
+                    } else {
+                        format!(
+                            "Thinking is currently using global default ({}).\nUse `/thinking on` or `/thinking off` to override.",
+                            if global_default { "on" } else { "off" }
+                        )
+                    }
+                }
+            }
+        }
     };
 
     if let Err(err) = channel
@@ -1563,10 +1620,18 @@ async fn build_memory_context(
     user_msg: &str,
     min_relevance_score: f64,
     session_id: Option<&str>,
+    pipeline: Option<&memory::RetrievalPipeline>,
 ) -> String {
     let mut context = String::new();
 
-    if let Ok(entries) = mem.recall(user_msg, 5, session_id, None, None).await {
+    // Route through RetrievalPipeline (cache + reranking) when available,
+    // falling back to raw Memory recall.
+    let recall_result = if let Some(p) = pipeline {
+        p.recall(user_msg, 5, session_id, None, None, None).await
+    } else {
+        mem.recall(user_msg, 5, session_id, None, None).await
+    };
+    if let Ok(entries) = recall_result {
         let mut included = 0usize;
         let mut used_chars = 0usize;
 
@@ -2281,11 +2346,16 @@ async fn process_channel_message(
         msg.reply_target.contains("@g.us") || msg.reply_target.starts_with("group:");
 
     let mem_recall_start = Instant::now();
+    let ch_pipeline = memory::RetrievalPipeline::new(
+        Arc::clone(&ctx.memory),
+        memory::RetrievalConfig::from_memory_config(&ctx.prompt_config.memory),
+    );
     let sender_memory_fut = build_memory_context(
         ctx.memory.as_ref(),
         &msg.content,
         ctx.min_relevance_score,
         Some(&msg.sender),
+        Some(&ch_pipeline),
     );
 
     let (sender_memory, group_memory) = if is_group_chat {
@@ -2294,6 +2364,7 @@ async fn process_channel_message(
             &msg.content,
             ctx.min_relevance_score,
             Some(&history_key),
+            Some(&ch_pipeline),
         );
         tokio::join!(sender_memory_fut, group_memory_fut)
     } else {
@@ -2461,6 +2532,36 @@ async fn process_channel_message(
         Cancelled,
     }
 
+    // Apply per-sender /thinking override: create an ephemeral provider with
+    // modified `extra_request_body` when the sender has toggled thinking on/off.
+    let thinking_provider: Option<Arc<dyn Provider>> = {
+        let override_val = ctx
+            .thinking_overrides
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&history_key)
+            .copied();
+        if let Some(thinking_enabled) = override_val {
+            let mut options = ctx.provider_runtime_options.clone();
+            if thinking_enabled {
+                options.extra_request_body.remove("enable_thinking");
+            } else {
+                options
+                    .extra_request_body
+                    .insert("enable_thinking".into(), serde_json::Value::Bool(false));
+            }
+            providers::create_provider_with_url_and_options(
+                &route.provider,
+                route.api_key.as_deref().or(ctx.api_key.as_deref()),
+                ctx.api_url.as_deref(),
+                &options,
+            )
+            .ok()
+            .map(Arc::from)
+        } else {
+            None
+        }
+    };
     let model_switch_callback = get_model_switch_state();
     let scale_cap = ctx
         .pacing
@@ -2479,6 +2580,9 @@ async fn process_channel_message(
     let elapsed_before_llm_ms = started_at.elapsed().as_millis() as u64;
     tracing::info!(elapsed_before_llm_ms, "⏱ Starting LLM call");
     let llm_result = loop {
+        let effective_provider: &dyn Provider = thinking_provider
+            .as_deref()
+            .unwrap_or(active_provider.as_ref());
         let loop_result = tokio::select! {
             () = cancellation_token.cancelled() => LlmExecutionResult::Cancelled,
             result = tokio::time::timeout(
@@ -2486,7 +2590,7 @@ async fn process_channel_message(
                 crate::agent::loop_::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
                     cost_tracking_context.clone(),
                 run_tool_call_loop(
-                    active_provider.as_ref(),
+                    effective_provider,
                     &mut history,
                     ctx.tools_registry.as_ref(),
                     notify_observer.as_ref() as &dyn Observer,
@@ -4798,6 +4902,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
             prices: Arc::new(config.cost.prices.clone()),
         }),
         pacing: config.pacing.clone(),
+        thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
     });
 
     // Hydrate in-memory conversation histories from persisted JSONL session files.
@@ -5142,6 +5247,7 @@ mod tests {
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         };
 
         assert!(compact_sender_history(&ctx, &sender));
@@ -5259,6 +5365,7 @@ mod tests {
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         };
 
         append_sender_turn(&ctx, &sender, ChatMessage::user("hello"));
@@ -5332,6 +5439,7 @@ mod tests {
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         };
 
         assert!(rollback_orphan_user_turn(&ctx, &sender, "pending"));
@@ -5424,6 +5532,7 @@ mod tests {
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         };
 
         assert!(rollback_orphan_user_turn(
@@ -5966,6 +6075,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -6049,6 +6159,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -6146,6 +6257,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -6228,6 +6340,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -6320,6 +6433,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -6433,6 +6547,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -6527,6 +6642,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -6636,6 +6752,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -6730,6 +6847,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -6814,6 +6932,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -7016,6 +7135,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(4);
@@ -7121,6 +7241,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -7241,6 +7362,7 @@ BTC is currently around $65,000 based on latest tool output."#
             cost_tracking: None,
             query_classification: crate::config::QueryClassificationConfig::default(),
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -7358,6 +7480,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -7457,6 +7580,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -7539,6 +7663,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -8215,7 +8340,7 @@ BTC is currently around $65,000 based on latest tool output."#
             .await
             .unwrap();
 
-        let context = build_memory_context(&mem, "age", 0.0, None).await;
+        let context = build_memory_context(&mem, "age", 0.0, None, None).await;
         assert!(context.contains("[Memory context]"));
         assert!(context.contains("Age is 45"));
     }
@@ -8247,7 +8372,7 @@ BTC is currently around $65,000 based on latest tool output."#
         .await
         .unwrap();
 
-        let context = build_memory_context(&mem, "screenshot", 0.0, None).await;
+        let context = build_memory_context(&mem, "screenshot", 0.0, None, None).await;
 
         // The image-marker entry must be excluded to prevent duplication.
         assert!(
@@ -8318,6 +8443,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -8452,6 +8578,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -8627,6 +8754,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -8737,6 +8865,7 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -9311,6 +9440,7 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         // Simulate a photo attachment message with [IMAGE:] marker.
@@ -9400,6 +9530,7 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -9565,6 +9696,7 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -9678,6 +9810,7 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -9783,6 +9916,7 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -9908,6 +10042,7 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -10174,6 +10309,7 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
+            thinking_overrides: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);

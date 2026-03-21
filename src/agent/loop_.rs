@@ -571,11 +571,18 @@ async fn build_context(
     user_msg: &str,
     min_relevance_score: f64,
     session_id: Option<&str>,
+    pipeline: Option<&memory::RetrievalPipeline>,
 ) -> String {
     let mut context = String::new();
 
-    // Pull relevant memories for this message
-    if let Ok(entries) = mem.recall(user_msg, 5, session_id, None, None).await {
+    // Pull relevant memories — route through RetrievalPipeline (which adds
+    // caching + reranking) when available, falling back to raw Memory recall.
+    let recall_result = if let Some(p) = pipeline {
+        p.recall(user_msg, 5, session_id, None, None, None).await
+    } else {
+        mem.recall(user_msg, 5, session_id, None, None).await
+    };
+    if let Ok(entries) = recall_result {
         let relevant: Vec<_> = entries
             .iter()
             .filter(|e| match e.score {
@@ -3701,6 +3708,12 @@ pub async fn run(
     )?);
     tracing::info!(backend = mem.name(), "Memory initialized");
 
+    // ── Retrieval pipeline (caching + reranking on top of memory) ──
+    let retrieval_pipeline = memory::RetrievalPipeline::new(
+        mem.clone(),
+        memory::RetrievalConfig::from_memory_config(&config.memory),
+    );
+
     // ── Peripherals (merge peripheral tools into registry) ─
     if !peripheral_overrides.is_empty() {
         tracing::info!(
@@ -4081,6 +4094,7 @@ pub async fn run(
             &msg,
             config.memory.min_relevance_score,
             memory_session_id.as_deref(),
+            Some(&retrieval_pipeline),
         )
         .await;
         let rag_limit = if config.agent.compact_context { 2 } else { 5 };
@@ -4267,6 +4281,7 @@ pub async fn run(
                 &user_input,
                 config.memory.min_relevance_score,
                 memory_session_id.as_deref(),
+                Some(&retrieval_pipeline),
             )
             .await;
             let rag_limit = if config.agent.compact_context { 2 } else { 5 };
@@ -4658,11 +4673,16 @@ pub async fn process_message(
         system_prompt.push_str(&deferred_section);
     }
 
+    let pm_pipeline = memory::RetrievalPipeline::new(
+        mem.clone(),
+        memory::RetrievalConfig::from_memory_config(&config.memory),
+    );
     let mem_context = build_context(
         mem.as_ref(),
         message,
         config.memory.min_relevance_score,
         session_id,
+        Some(&pm_pipeline),
     )
     .await;
     let rag_limit = if config.agent.compact_context { 2 } else { 5 };
@@ -6821,7 +6841,7 @@ Tail"#;
         .await
         .unwrap();
 
-        let context = build_context(&mem, "status updates", 0.0, None).await;
+        let context = build_context(&mem, "status updates", 0.0, None, None).await;
         assert!(context.contains("user_msg_real"));
         assert!(!context.contains("assistant_resp_poisoned"));
         assert!(!context.contains("fabricated event"));
