@@ -112,6 +112,19 @@ pub struct Config {
     #[serde(default)]
     pub extra_headers: HashMap<String, String>,
 
+    /// Extra fields to include in every LLM provider request body.
+    ///
+    /// Useful for provider-specific parameters that zeroclaw does not natively
+    /// support (e.g. `enable_thinking = false` for DashScope/Qwen reasoning
+    /// models, or `top_k = 40` for sampling tweaks).
+    ///
+    /// ```toml
+    /// [extra_request_body]
+    /// enable_thinking = false
+    /// ```
+    #[serde(default)]
+    pub extra_request_body: HashMap<String, serde_json::Value>,
+
     /// Provider-specific environment variables injected at daemon startup.
     ///
     /// Use this to store API keys for secondary providers without relying on
@@ -6975,6 +6988,7 @@ impl Default for Config {
             default_temperature: default_temperature(),
             provider_timeout_secs: default_provider_timeout_secs(),
             extra_headers: HashMap::new(),
+            extra_request_body: HashMap::new(),
             provider_env: HashMap::new(),
             observability: ObservabilityConfig::default(),
             autonomy: AutonomyConfig::default(),
@@ -9867,6 +9881,7 @@ default_temperature = 0.7
             default_temperature: 0.5,
             provider_timeout_secs: 120,
             extra_headers: HashMap::new(),
+            extra_request_body: HashMap::new(),
             provider_env: HashMap::new(),
             observability: ObservabilityConfig {
                 backend: "log".into(),
@@ -10356,6 +10371,7 @@ default_temperature = 0.7
             default_temperature: 0.9,
             provider_timeout_secs: 120,
             extra_headers: HashMap::new(),
+            extra_request_body: HashMap::new(),
             provider_env: HashMap::new(),
             observability: ObservabilityConfig::default(),
             autonomy: AutonomyConfig::default(),

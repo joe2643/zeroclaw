@@ -46,6 +46,10 @@ pub struct OpenAiCompatibleProvider {
     /// Custom API path suffix (e.g. "/v2/generate").
     /// When set, overrides the default `/chat/completions` path detection.
     api_path: Option<String>,
+    /// Extra fields to include in every request body.
+    /// Flattened into the JSON request via `#[serde(flatten)]`.
+    /// Useful for provider-specific parameters (e.g. `enable_thinking: false`).
+    extra_request_body: std::collections::HashMap<String, serde_json::Value>,
 }
 
 /// How the provider expects the API key to be sent.
@@ -183,6 +187,7 @@ impl OpenAiCompatibleProvider {
             extra_headers: std::collections::HashMap::new(),
             reasoning_effort: None,
             api_path: None,
+            extra_request_body: std::collections::HashMap::new(),
         }
     }
 
@@ -217,6 +222,17 @@ impl OpenAiCompatibleProvider {
     /// When set, replaces the default `/chat/completions` path.
     pub fn with_api_path(mut self, api_path: Option<String>) -> Self {
         self.api_path = api_path;
+        self
+    }
+
+    /// Set extra fields to include in every request body.
+    /// These are flattened into the JSON request alongside standard fields.
+    /// Useful for provider-specific parameters like `enable_thinking: false`.
+    pub fn with_extra_request_body(
+        mut self,
+        extra: std::collections::HashMap<String, serde_json::Value>,
+    ) -> Self {
+        self.extra_request_body = extra;
         self
     }
 
@@ -420,6 +436,9 @@ struct ApiChatRequest {
     tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
+    /// Extra provider-specific fields (e.g. `enable_thinking: false`).
+    #[serde(flatten)]
+    extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -620,6 +639,9 @@ struct NativeChatRequest {
     tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
+    /// Extra provider-specific fields (e.g. `enable_thinking: false`).
+    #[serde(flatten)]
+    extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1294,6 +1316,7 @@ impl Provider for OpenAiCompatibleProvider {
             tool_stream: None,
             tools: None,
             tool_choice: None,
+            extra: self.extra_request_body.clone(),
         };
 
         let url = self.chat_completions_url();
@@ -1418,6 +1441,7 @@ impl Provider for OpenAiCompatibleProvider {
             tool_stream: None,
             tools: None,
             tool_choice: None,
+            extra: self.extra_request_body.clone(),
         };
 
         let url = self.chat_completions_url();
@@ -1538,6 +1562,7 @@ impl Provider for OpenAiCompatibleProvider {
             } else {
                 Some("auto".to_string())
             },
+            extra: self.extra_request_body.clone(),
         };
 
         let url = self.chat_completions_url();
@@ -1638,6 +1663,7 @@ impl Provider for OpenAiCompatibleProvider {
                 .tool_stream_for_tools(tools.as_ref().is_some_and(|tools| !tools.is_empty())),
             tool_choice: tools.as_ref().map(|_| "auto".to_string()),
             tools,
+            extra: self.extra_request_body.clone(),
         };
 
         let url = self.chat_completions_url();
@@ -1783,6 +1809,7 @@ impl Provider for OpenAiCompatibleProvider {
             tool_stream: None,
             tools: None,
             tool_choice: None,
+            extra: self.extra_request_body.clone(),
         };
 
         let url = self.chat_completions_url();
@@ -1926,6 +1953,7 @@ mod tests {
             tool_stream: None,
             tools: None,
             tool_choice: None,
+            extra: std::collections::HashMap::new(),
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("llama-3.3-70b"));
@@ -2708,6 +2736,7 @@ mod tests {
             tool_stream: None,
             tools: Some(tools),
             tool_choice: Some("auto".to_string()),
+            extra: std::collections::HashMap::new(),
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"tools\""));
@@ -2742,6 +2771,7 @@ mod tests {
                 }
             })]),
             tool_choice: Some("auto".to_string()),
+            extra: std::collections::HashMap::new(),
         };
 
         let json = serde_json::to_string(&req).unwrap();
@@ -2775,6 +2805,7 @@ mod tests {
                 }
             })]),
             tool_choice: Some("auto".to_string()),
+            extra: std::collections::HashMap::new(),
         };
 
         let json = serde_json::to_string(&req).unwrap();
@@ -3307,5 +3338,63 @@ mod tests {
         assert!(!json.as_object().unwrap().contains_key("type"));
         assert!(!json.as_object().unwrap().contains_key("function"));
         assert!(!json.as_object().unwrap().contains_key("parameters"));
+    }
+
+    #[test]
+    fn extra_request_body_flattened_into_json() {
+        let mut extra = std::collections::HashMap::new();
+        extra.insert(
+            "enable_thinking".to_string(),
+            serde_json::Value::Bool(false),
+        );
+        extra.insert(
+            "top_k".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(40)),
+        );
+        let req = ApiChatRequest {
+            model: "qwen3.5-plus".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hi".to_string()),
+            }],
+            temperature: 0.7,
+            stream: Some(false),
+            reasoning_effort: None,
+            tool_stream: None,
+            tools: None,
+            tool_choice: None,
+            extra,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(
+            json.contains("\"enable_thinking\":false"),
+            "extra fields should be flattened into request JSON"
+        );
+        assert!(
+            json.contains("\"top_k\":40"),
+            "extra fields should be flattened into request JSON"
+        );
+    }
+
+    #[test]
+    fn empty_extra_request_body_adds_no_fields() {
+        let req = ApiChatRequest {
+            model: "test".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hi".to_string()),
+            }],
+            temperature: 0.7,
+            stream: Some(false),
+            reasoning_effort: None,
+            tool_stream: None,
+            tools: None,
+            tool_choice: None,
+            extra: std::collections::HashMap::new(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        // Should not contain any unexpected keys
+        assert!(!json.contains("enable_thinking"));
+        assert!(!json.contains("top_k"));
     }
 }
