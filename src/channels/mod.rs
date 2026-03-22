@@ -3936,6 +3936,7 @@ fn collect_configured_channels(
                                 wa.group_policy.clone(),
                                 wa.self_chat_mode,
                             )
+                            .with_mention_only(wa.mention_only)
                             .with_transcription(config.transcription.clone())
                             .with_tts(config.tts.clone()),
                         ),

@@ -4392,6 +4392,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                         group_policy: WhatsAppChatPolicy::default(),
                         self_chat_mode: false,
                         proxy_url: None,
+                        mention_only: false,
                     });
 
                     println!(
@@ -4498,6 +4499,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     group_policy: WhatsAppChatPolicy::default(),
                     self_chat_mode: false,
                     proxy_url: None,
+                    mention_only: false,
                 });
             }
             ChannelMenuChoice::Linq => {
