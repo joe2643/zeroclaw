@@ -133,7 +133,7 @@ pub(crate) fn is_moonshot_alias(name: &str) -> bool {
 }
 
 pub(crate) fn is_qwen_cn_alias(name: &str) -> bool {
-    matches!(name, "qwen" | "dashscope" | "qwen-cn" | "dashscope-cn")
+    matches!(name, "qwen" | "dashscope" | "qwen-cn" | "dashscope-cn" | "bailian")
 }
 
 pub(crate) fn is_qwen_intl_alias(name: &str) -> bool {
@@ -508,6 +508,9 @@ fn resolve_qwen_oauth_context(credential_override: Option<&str>) -> QwenOauthPro
 
     if credential.is_none() && !placeholder_requested {
         credential = read_non_empty_env("DASHSCOPE_API_KEY");
+    }
+    if credential.is_none() && !placeholder_requested {
+        credential = read_non_empty_env("BAILIAN_API_KEY");
     }
 
     let base_url = env_resource_url
@@ -1212,7 +1215,7 @@ fn create_provider_with_url_and_options(
         "opencode-go" => Ok(compat(OpenAiCompatibleProvider::new(
             "OpenCode Go", "https://opencode.ai/zen/go/v1", key, AuthStyle::Bearer,
         ))),
-        name if zai_base_url(name).is_some() => Ok(compat(OpenAiCompatibleProvider::new(
+        name if zai_base_url(name).is_some() => Ok(compat(OpenAiCompatibleProvider::new_no_responses_fallback(
             "Z.AI",
             zai_base_url(name).expect("checked in guard"),
             key,
@@ -1910,9 +1913,10 @@ pub fn list_providers() -> Vec<ProviderInfo> {
         },
         ProviderInfo {
             name: "qwen",
-            display_name: "Qwen (DashScope / Qwen Code OAuth)",
+            display_name: "Qwen (DashScope / Bailian / Qwen Code OAuth)",
             aliases: &[
                 "dashscope",
+                "bailian",
                 "qwen-intl",
                 "dashscope-intl",
                 "qwen-us",
