@@ -4626,6 +4626,12 @@ pub struct ModelRouteConfig {
     /// Optional API key override for this route's provider
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Optional context-window override (in tokens) for this route's model.
+    /// When set, overrides the global `agent.max_context_tokens` for proactive
+    /// history compaction. Use this when different models have different context
+    /// window sizes (e.g. 128k vs 32k).
+    #[serde(default)]
+    pub max_context_tokens: Option<usize>,
 }
 
 // ── Embedding routing ───────────────────────────────────────────

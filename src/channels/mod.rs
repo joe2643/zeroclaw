@@ -256,6 +256,9 @@ struct ChannelRouteSelection {
     /// the global `api_key` in [`ChannelRuntimeContext`] when creating the
     /// provider for this route.
     api_key: Option<String>,
+    /// Route-specific context-window override (in tokens). When set, overrides
+    /// the global `agent.max_context_tokens` for proactive history compaction.
+    max_context_tokens: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1042,6 +1045,7 @@ fn default_route_selection(ctx: &ChannelRuntimeContext) -> ChannelRouteSelection
         provider: defaults.default_provider,
         model: defaults.model,
         api_key: None,
+        max_context_tokens: None,
     }
 }
 
@@ -1555,8 +1559,10 @@ async fn handle_runtime_command_if_needed(
                     current.provider = route.provider.clone();
                     current.model = route.model.clone();
                     current.api_key = route.api_key.clone();
+                    current.max_context_tokens = route.max_context_tokens;
                 } else {
                     current.model = model.clone();
+                    current.max_context_tokens = None;
                 }
                 set_route_selection(ctx, &sender_key, current.clone());
 
@@ -2211,6 +2217,7 @@ async fn process_channel_message(
                 provider: matched_route.provider.clone(),
                 model: matched_route.model.clone(),
                 api_key: matched_route.api_key.clone(),
+                max_context_tokens: matched_route.max_context_tokens,
             };
         }
     }
@@ -2629,7 +2636,7 @@ async fn process_channel_message(
                     ctx.activated_tools.as_ref(),
                     Some(model_switch_callback.clone()),
                     &ctx.pacing,
-                    ctx.prompt_config.agent.max_context_tokens,
+                    route.max_context_tokens.unwrap_or(ctx.prompt_config.agent.max_context_tokens),
                 ),
                 ),
             ) => LlmExecutionResult::Completed(result),
@@ -6511,6 +6518,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 provider: "openrouter".to_string(),
                 model: "route-model".to_string(),
                 api_key: None,
+                max_context_tokens: None,
             },
         );
 
@@ -9661,6 +9669,7 @@ This is an example JSON object for profile settings."#;
             provider: "vision-provider".into(),
             model: "gpt-4-vision".into(),
             api_key: None,
+            max_context_tokens: None,
         }];
 
         let runtime_ctx = Arc::new(ChannelRuntimeContext {
@@ -9775,6 +9784,7 @@ This is an example JSON object for profile settings."#;
             provider: "vision-provider".into(),
             model: "gpt-4-vision".into(),
             api_key: None,
+            max_context_tokens: None,
         }];
 
         let runtime_ctx = Arc::new(ChannelRuntimeContext {
@@ -9881,6 +9891,7 @@ This is an example JSON object for profile settings."#;
             provider: "vision-provider".into(),
             model: "gpt-4-vision".into(),
             api_key: None,
+            max_context_tokens: None,
         }];
 
         let runtime_ctx = Arc::new(ChannelRuntimeContext {
@@ -10000,12 +10011,14 @@ This is an example JSON object for profile settings."#;
                 provider: "fast-provider".into(),
                 model: "fast-model".into(),
                 api_key: None,
+                max_context_tokens: None,
             },
             crate::config::ModelRouteConfig {
                 hint: "code".into(),
                 provider: "code-provider".into(),
                 model: "code-model".into(),
                 api_key: None,
+                max_context_tokens: None,
             },
         ];
 

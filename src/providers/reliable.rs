@@ -226,7 +226,9 @@ fn compact_error_detail(err: &anyhow::Error) -> String {
 
 /// Truncate conversation history by dropping the oldest non-system messages.
 /// Returns the number of messages dropped. Keeps at least the system message
-/// (if any) and the most recent user message.
+/// (if any) and the most recent user message. After truncation the sequence is
+/// sanitised so the first non-system message is always "user" and no two
+/// consecutive messages share the same role (GLM / Z.AI requirement).
 fn truncate_for_context(messages: &mut Vec<ChatMessage>) -> usize {
     // Find all non-system message indices
     let non_system: Vec<usize> = messages
@@ -250,7 +252,41 @@ fn truncate_for_context(messages: &mut Vec<ChatMessage>) -> usize {
         messages.remove(idx);
     }
 
-    drop_count
+    // --- Post-truncation sanitisation ---
+    // 1. First non-system message must be "user"; strip leading assistants.
+    let extra = sanitize_message_roles(messages);
+
+    drop_count + extra
+}
+
+/// Ensure the first non-system message is "user" and no two consecutive
+/// messages share the same role. Returns the number of extra messages removed.
+fn sanitize_message_roles(messages: &mut Vec<ChatMessage>) -> usize {
+    let before = messages.len();
+
+    // 1. Strip non-system messages before the first "user" message.
+    loop {
+        let first_non_sys = messages.iter().position(|m| m.role != "system");
+        match first_non_sys {
+            Some(idx) if messages[idx].role != "user" => {
+                messages.remove(idx);
+            }
+            _ => break,
+        }
+    }
+
+    // 2. Remove consecutive same-role messages (keep the later one, which is
+    //    more recent and therefore more relevant).
+    let mut i = 1;
+    while i < messages.len() {
+        if messages[i].role == messages[i - 1].role && messages[i].role != "system" {
+            messages.remove(i - 1);
+        } else {
+            i += 1;
+        }
+    }
+
+    before - messages.len()
 }
 
 fn push_failure(
@@ -2199,6 +2235,55 @@ mod tests {
         let dropped = truncate_for_context(&mut messages);
         assert_eq!(dropped, 0);
         assert_eq!(messages.len(), 1);
+    }
+
+    #[test]
+    fn truncate_for_context_sanitises_leading_assistant() {
+        // 6 non-system → drop 3 (user1, asst1, user2) → leaves asst2, user3, asst3
+        // Sanitisation should strip the leading assistant so first non-system is user.
+        let mut messages = vec![
+            ChatMessage::system("sys"),
+            ChatMessage::user("u1"),
+            ChatMessage::assistant("a1"),
+            ChatMessage::user("u2"),
+            ChatMessage::assistant("a2"),
+            ChatMessage::user("u3"),
+            ChatMessage::assistant("a3"),
+        ];
+        let dropped = truncate_for_context(&mut messages);
+        // 3 from truncation + 1 from sanitisation (leading assistant)
+        assert_eq!(dropped, 4);
+        assert_eq!(messages[0].role, "system");
+        assert_eq!(messages[1].role, "user");
+        assert_eq!(messages[1].content, "u3");
+    }
+
+    #[test]
+    fn sanitize_message_roles_fixes_consecutive_same_role() {
+        let mut messages = vec![
+            ChatMessage::system("sys"),
+            ChatMessage::user("u1"),
+            ChatMessage::user("u2"), // consecutive user
+            ChatMessage::assistant("a1"),
+        ];
+        let extra = sanitize_message_roles(&mut messages);
+        assert_eq!(extra, 1);
+        assert_eq!(messages.len(), 3);
+        // Keeps the later user message
+        assert_eq!(messages[1].content, "u2");
+    }
+
+    #[test]
+    fn sanitize_message_roles_noop_on_valid_sequence() {
+        let mut messages = vec![
+            ChatMessage::system("sys"),
+            ChatMessage::user("u1"),
+            ChatMessage::assistant("a1"),
+            ChatMessage::user("u2"),
+        ];
+        let extra = sanitize_message_roles(&mut messages);
+        assert_eq!(extra, 0);
+        assert_eq!(messages.len(), 4);
     }
 
     /// Mock that fails with context error on first N calls, then succeeds.
