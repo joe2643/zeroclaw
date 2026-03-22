@@ -747,7 +747,12 @@ fn parse_runtime_command(channel_name: &str, content: &str) -> Option<ChannelRun
         return None;
     }
 
+    // Strip [From: +phone] prefix added by WhatsApp group messages
     let trimmed = content.trim();
+    let trimmed = trimmed
+        .strip_prefix("[From: ")
+        .and_then(|s| s.find(']').map(|i| s[i + 1..].trim()))
+        .unwrap_or(trimmed);
     if !trimmed.starts_with('/') {
         return None;
     }
@@ -8745,6 +8750,8 @@ BTC is currently around $65,000 based on latest tool output."#
         let turns = histories
             .get("test-channel_chat-ctx_alice")
             .expect("history should be stored for sender");
+            .get("test-channel_chat-ctx")
+            .expect("history should be stored for chat");
         assert_eq!(turns[0].role, "user");
         assert_eq!(turns[0].content, "hello");
         assert!(!turns[0].content.contains("[Memory context]"));
@@ -9543,6 +9550,8 @@ This is an example JSON object for profile settings."#;
         let turns = histories
             .get("test-channel_chat-photo_zeroclaw_user")
             .expect("history should exist for sender");
+            .get("test-channel_chat-photo")
+            .expect("history should exist for chat");
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].role, "user");
         assert_eq!(turns[0].content, "What is WAL?");
