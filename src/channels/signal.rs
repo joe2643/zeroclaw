@@ -724,65 +724,81 @@ impl SignalChannel {
     }
 }
 
-/// Regex-like scan for `@<phone_number>` patterns in outgoing text.
-/// Returns the cleaned text (with @number replaced by a placeholder char)
-/// and a list of signal-cli mention strings in `"start:length:number"` format.
+/// Scan for `@<phone_number>` or `@<uuid>` patterns in outgoing text.
+/// Returns cleaned text (with matched @-mentions replaced by U+FFFC) and
+/// a vec of the identifiers (phone or UUID) in encounter order.
+/// Positions are NOT final — caller must locate FFFC chars in the final text.
 fn parse_outgoing_mentions_impl(text: &str) -> (String, Vec<String>) {
     let mut result = String::with_capacity(text.len());
-    let mut mentions = Vec::new();
-    let mut chars = text.char_indices().peekable();
+    let mut identifiers: Vec<String> = Vec::new();
+    let mut i = 0;
+    let bytes = text.as_bytes();
+    let len = bytes.len();
 
-    while let Some((i, ch)) = chars.next() {
-        if ch == '@' {
-            // Try to parse a phone number after @
+    while i < len {
+        if bytes[i] == b'@' && i + 1 < len {
             let rest = &text[i + 1..];
-            // Match optional '+' then digits (at least 6 chars for a phone number)
+            // Try phone number: optional '+' then digits, at least 6 chars
             let num_end = rest
-                .char_indices()
-                .take_while(|(j, c)| {
-                    c.is_ascii_digit() || (*j == 0 && *c == '+')
-                })
-                .last()
-                .map(|(j, c)| j + c.len_utf8())
-                .unwrap_or(0);
-
+                .as_bytes()
+                .iter()
+                .enumerate()
+                .take_while(|(j, &b)| b.is_ascii_digit() || (*j == 0 && b == b'+'))
+                .count();
             if num_end >= 6 {
-                let number_raw = &rest[..num_end];
-                let number = if number_raw.starts_with('+') {
-                    number_raw.to_string()
+                let raw = &rest[..num_end];
+                let number = if raw.starts_with('+') {
+                    raw.to_string()
                 } else {
-                    format!("+{number_raw}")
+                    format!("+{raw}")
                 };
-
-                // Insert OBJECT REPLACEMENT CHARACTER as mention placeholder
-                let start = result.len();
                 result.push('\u{FFFC}');
-                let length = '\u{FFFC}'.len_utf8();
-                mentions.push(format!("{start}:{length}:{number}"));
-
-                // Skip past the number in the input
-                for _ in 0..num_end {
-                    chars.next();
-                }
+                identifiers.push(number);
+                i += 1 + num_end;
                 continue;
             }
+            // Try UUID: 8-4-4-4-12 hex pattern (36 chars)
+            if rest.len() >= 36 {
+                let candidate = &rest[..36];
+                if is_uuid_format(candidate) {
+                    result.push('\u{FFFC}');
+                    identifiers.push(candidate.to_string());
+                    i += 1 + 36;
+                    // Skip optional trailing whitespace after UUID mention
+                    continue;
+                }
+            }
         }
+        let ch = text[i..].chars().next().unwrap();
         result.push(ch);
+        i += ch.len_utf8();
     }
 
-    (result, mentions)
+    (result, identifiers)
 }
 
-/// Parse markdown-style formatting from text and return cleaned text plus
-/// signal-cli `textStyle` entries (`"start:length:STYLE"`).
+/// Check if a string matches UUID format: 8-4-4-4-12 hex chars.
+fn is_uuid_format(s: &str) -> bool {
+    if s.len() != 36 {
+        return false;
+    }
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 5 {
+        return false;
+    }
+    let expected_lens = [8, 4, 4, 4, 12];
+    parts
+        .iter()
+        .zip(expected_lens.iter())
+        .all(|(part, &elen)| part.len() == elen && part.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Parse markdown formatting and return cleaned text + signal-cli `textStyle`
+/// entries. Processes the text in byte order, checking multi-char markers
+/// (`**`, `~~`, ```` ``` ````) before single-char ones (`*`, `` ` ``).
 ///
-/// Supported markers:
-/// - `**bold**` → BOLD
-/// - `*italic*` → ITALIC
-/// - `` `code` `` → MONOSPACE
-/// - `~~strike~~` → STRIKETHROUGH
-///
-/// Triple-backtick code blocks are converted to MONOSPACE spans.
+/// Styles: `**bold**`→BOLD, `*italic*`→ITALIC, `` `code` ``→MONOSPACE,
+/// `~~strike~~`→STRIKETHROUGH, ```` ```block``` ````→MONOSPACE.
 fn parse_text_styles(text: &str) -> (String, Vec<String>) {
     let mut out = String::with_capacity(text.len());
     let mut styles: Vec<String> = Vec::new();
@@ -791,20 +807,19 @@ fn parse_text_styles(text: &str) -> (String, Vec<String>) {
     let mut i = 0;
 
     while i < len {
-        // ── triple backtick code block ──
+        // ── triple-backtick code block ──
         if i + 2 < len && &bytes[i..i + 3] == b"```" {
+            let after_fence = i + 3;
             // Skip optional language tag on the same line
-            let content_start = if let Some(nl) = text[i + 3..].find('\n') {
-                i + 3 + nl + 1
-            } else {
-                i + 3
-            };
+            let content_start = text[after_fence..]
+                .find('\n')
+                .map(|nl| after_fence + nl + 1)
+                .unwrap_or(after_fence);
             if let Some(end_offset) = text[content_start..].find("```") {
-                let inner = &text[content_start..content_start + end_offset];
-                let trimmed = inner.trim_matches('\n');
+                let inner = text[content_start..content_start + end_offset].trim_matches('\n');
                 let start = out.len();
-                out.push_str(trimmed);
-                let byte_len = trimmed.len();
+                out.push_str(inner);
+                let byte_len = inner.len();
                 if byte_len > 0 {
                     styles.push(format!("{start}:{byte_len}:MONOSPACE"));
                 }
@@ -812,74 +827,107 @@ fn parse_text_styles(text: &str) -> (String, Vec<String>) {
                 continue;
             }
         }
-        // ── inline backtick ──
-        if bytes[i] == b'`' && i + 1 < len && bytes[i + 1] != b'`' {
+        // ── inline backtick (but not triple) ──
+        if bytes[i] == b'`' && !(i + 1 < len && bytes[i + 1] == b'`') {
+            // Find matching closing backtick (not followed by another backtick)
             if let Some(end_offset) = text[i + 1..].find('`') {
-                let inner = &text[i + 1..i + 1 + end_offset];
-                let start = out.len();
-                out.push_str(inner);
-                let byte_len = inner.len();
-                if byte_len > 0 {
-                    styles.push(format!("{start}:{byte_len}:MONOSPACE"));
-                }
-                i = i + 1 + end_offset + 1;
-                continue;
-            }
-        }
-        // ── bold **..** ──
-        if i + 1 < len && &bytes[i..i + 2] == b"**" {
-            if let Some(end_offset) = text[i + 2..].find("**") {
-                let inner = &text[i + 2..i + 2 + end_offset];
-                let start = out.len();
-                out.push_str(inner);
-                let byte_len = inner.len();
-                if byte_len > 0 {
-                    styles.push(format!("{start}:{byte_len}:BOLD"));
-                }
-                i = i + 2 + end_offset + 2;
-                continue;
-            }
-        }
-        // ── strikethrough ~~..~~ ──
-        if i + 1 < len && &bytes[i..i + 2] == b"~~" {
-            if let Some(end_offset) = text[i + 2..].find("~~") {
-                let inner = &text[i + 2..i + 2 + end_offset];
-                let start = out.len();
-                out.push_str(inner);
-                let byte_len = inner.len();
-                if byte_len > 0 {
-                    styles.push(format!("{start}:{byte_len}:STRIKETHROUGH"));
-                }
-                i = i + 2 + end_offset + 2;
-                continue;
-            }
-        }
-        // ── italic *..* (single asterisk, not double) ──
-        if bytes[i] == b'*' && (i + 1 >= len || bytes[i + 1] != b'*') {
-            if let Some(end_offset) = text[i + 1..].find('*') {
-                // Make sure the closing * is not part of **
-                if end_offset > 0
-                    && (i + 1 + end_offset + 1 >= len || bytes[i + 1 + end_offset + 1] != b'*')
-                {
+                if end_offset > 0 {
                     let inner = &text[i + 1..i + 1 + end_offset];
                     let start = out.len();
                     out.push_str(inner);
                     let byte_len = inner.len();
                     if byte_len > 0 {
-                        styles.push(format!("{start}:{byte_len}:ITALIC"));
+                        styles.push(format!("{start}:{byte_len}:MONOSPACE"));
                     }
                     i = i + 1 + end_offset + 1;
                     continue;
                 }
             }
         }
-        // ── plain character (handle multi-byte UTF-8) ──
+        // ── bold **..** ──
+        if i + 1 < len && &bytes[i..i + 2] == b"**" {
+            // Find closing ** — must not match inside a *** sequence
+            if let Some(end_offset) = text[i + 2..].find("**") {
+                if end_offset > 0 {
+                    let inner = &text[i + 2..i + 2 + end_offset];
+                    let start = out.len();
+                    out.push_str(inner);
+                    let byte_len = inner.len();
+                    if byte_len > 0 {
+                        styles.push(format!("{start}:{byte_len}:BOLD"));
+                    }
+                    i = i + 2 + end_offset + 2;
+                    continue;
+                }
+            }
+        }
+        // ── strikethrough ~~..~~ ──
+        if i + 1 < len && &bytes[i..i + 2] == b"~~" {
+            if let Some(end_offset) = text[i + 2..].find("~~") {
+                if end_offset > 0 {
+                    let inner = &text[i + 2..i + 2 + end_offset];
+                    let start = out.len();
+                    out.push_str(inner);
+                    let byte_len = inner.len();
+                    if byte_len > 0 {
+                        styles.push(format!("{start}:{byte_len}:STRIKETHROUGH"));
+                    }
+                    i = i + 2 + end_offset + 2;
+                    continue;
+                }
+            }
+        }
+        // ── italic *..* — only single *, not ** ──
+        if bytes[i] == b'*' && !(i + 1 < len && bytes[i + 1] == b'*') {
+            // Search for a closing single * that is NOT part of a ** pair
+            let search_from = i + 1;
+            let mut found = false;
+            let mut scan = search_from;
+            while scan < len {
+                if bytes[scan] == b'*' {
+                    // Check this * is not part of **
+                    let prev_star = scan > 0 && bytes[scan - 1] == b'*';
+                    let next_star = scan + 1 < len && bytes[scan + 1] == b'*';
+                    if !prev_star && !next_star && scan > search_from {
+                        let inner = &text[search_from..scan];
+                        let start = out.len();
+                        out.push_str(inner);
+                        let byte_len = inner.len();
+                        if byte_len > 0 {
+                            styles.push(format!("{start}:{byte_len}:ITALIC"));
+                        }
+                        i = scan + 1;
+                        found = true;
+                        break;
+                    }
+                }
+                // Advance by char width
+                let ch = text[scan..].chars().next().unwrap();
+                scan += ch.len_utf8();
+            }
+            if found {
+                continue;
+            }
+        }
+        // ── plain character ──
         let ch = text[i..].chars().next().unwrap();
         out.push(ch);
         i += ch.len_utf8();
     }
 
     (out, styles)
+}
+
+/// Build final signal-cli `mentions` array by locating FFFC placeholders
+/// in the final text and pairing them with identifiers from the mention parser.
+fn build_mention_params(final_text: &str, identifiers: &[String]) -> Vec<String> {
+    let fffc_len = '\u{FFFC}'.len_utf8();
+    final_text
+        .char_indices()
+        .filter(|(_, ch)| *ch == '\u{FFFC}')
+        .zip(identifiers.iter())
+        .map(|((byte_pos, _), ident)| format!("{byte_pos}:{fffc_len}:{ident}"))
+        .collect()
 }
 
 fn truncate_reply_preview(text: &str, max_chars: usize) -> String {
@@ -899,20 +947,23 @@ impl Channel for SignalChannel {
     }
 
     async fn send(&self, message: &SendMessage) -> anyhow::Result<()> {
-        // 1) Parse @<phone> mentions
-        let (after_mentions, mentions) = Self::parse_outgoing_mentions(&message.content);
-        // 2) Parse markdown formatting → signal-cli textStyle
-        let (text, text_styles) = parse_text_styles(&after_mentions);
+        // Pipeline: mentions first (replace @phone/@uuid with FFFC), then
+        // strip markdown markers. Finally, locate FFCCs in the clean text
+        // to get correct byte positions for signal-cli.
+        let (after_mentions, identifiers) =
+            Self::parse_outgoing_mentions(&message.content);
+        let (final_text, text_styles) = parse_text_styles(&after_mentions);
+        let mentions = build_mention_params(&final_text, &identifiers);
 
         let mut params = match Self::parse_recipient_target(&message.recipient) {
             RecipientTarget::Direct(number) => serde_json::json!({
                 "recipient": [number],
-                "message": text,
+                "message": final_text,
                 "account": &self.account,
             }),
             RecipientTarget::Group(group_id) => serde_json::json!({
                 "groupId": group_id,
-                "message": text,
+                "message": final_text,
                 "account": &self.account,
             }),
         };
@@ -2090,41 +2141,65 @@ mod tests {
 
     #[test]
     fn parse_outgoing_mentions_with_plus() {
-        let (text, mentions) = parse_outgoing_mentions_impl("Hello @+85251159218 how are you?");
-        assert_eq!(mentions.len(), 1);
-        assert!(mentions[0].ends_with(":+85251159218"));
+        let (text, ids) = parse_outgoing_mentions_impl("Hello @+85251159218 how are you?");
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], "+85251159218");
         assert!(text.contains('\u{FFFC}'));
         assert!(!text.contains("85251159218"));
     }
 
     #[test]
     fn parse_outgoing_mentions_without_plus() {
-        let (text, mentions) = parse_outgoing_mentions_impl("Hey @85266829736 check this");
-        assert_eq!(mentions.len(), 1);
-        assert!(mentions[0].ends_with(":+85266829736"));
+        let (text, ids) = parse_outgoing_mentions_impl("Hey @85266829736 check this");
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], "+85266829736");
         assert!(text.contains('\u{FFFC}'));
     }
 
     #[test]
+    fn parse_outgoing_mentions_uuid() {
+        let (text, ids) = parse_outgoing_mentions_impl(
+            "Hey @592fd626-633f-4966-a1a7-8d15688e9241 check this",
+        );
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], "592fd626-633f-4966-a1a7-8d15688e9241");
+        assert!(text.contains('\u{FFFC}'));
+        assert!(!text.contains("592fd626"));
+    }
+
+    #[test]
     fn parse_outgoing_mentions_multiple() {
-        let (_, mentions) =
+        let (_, ids) =
             parse_outgoing_mentions_impl("@85251159218 and @+85266829736 look at this");
-        assert_eq!(mentions.len(), 2);
+        assert_eq!(ids.len(), 2);
     }
 
     #[test]
     fn parse_outgoing_mentions_no_mention() {
-        let (text, mentions) = parse_outgoing_mentions_impl("Just normal text, no mentions");
-        assert!(mentions.is_empty());
+        let (text, ids) = parse_outgoing_mentions_impl("Just normal text, no mentions");
+        assert!(ids.is_empty());
         assert_eq!(text, "Just normal text, no mentions");
     }
 
     #[test]
     fn parse_outgoing_mentions_short_number_ignored() {
-        // Numbers shorter than 6 digits should not be treated as phone mentions
-        let (text, mentions) = parse_outgoing_mentions_impl("price is @1234");
-        assert!(mentions.is_empty());
+        let (text, ids) = parse_outgoing_mentions_impl("price is @1234");
+        assert!(ids.is_empty());
         assert_eq!(text, "price is @1234");
+    }
+
+    #[test]
+    fn build_mention_params_correct_positions() {
+        // Simulate: mention first, then style strip
+        let (after_mentions, ids) =
+            parse_outgoing_mentions_impl("**Hello** @+85251159218!");
+        let (final_text, _styles) = parse_text_styles(&after_mentions);
+        let mentions = build_mention_params(&final_text, &ids);
+        assert_eq!(mentions.len(), 1);
+        // "Hello " = 6 bytes, then FFFC at position 6
+        let fffc_pos = final_text.find('\u{FFFC}').unwrap();
+        assert!(mentions[0].starts_with(&format!("{fffc_pos}:")));
+        assert!(mentions[0].ends_with(":+85251159218"));
     }
 
     // ── text style parsing tests ──────────────────────────────────
@@ -2141,6 +2216,25 @@ mod tests {
         let (text, styles) = parse_text_styles("This is *important* info");
         assert_eq!(text, "This is important info");
         assert_eq!(styles, vec!["8:9:ITALIC"]);
+    }
+
+    #[test]
+    fn text_styles_bold_then_italic() {
+        // Bold ** must not eat italic * markers
+        let (text, styles) = parse_text_styles("**Bold** and *italic*");
+        assert_eq!(text, "Bold and italic");
+        assert_eq!(styles.len(), 2);
+        assert_eq!(styles[0], "0:4:BOLD");
+        assert_eq!(styles[1], "9:6:ITALIC");
+    }
+
+    #[test]
+    fn text_styles_italic_then_bold() {
+        let (text, styles) = parse_text_styles("*italic* and **bold**");
+        assert_eq!(text, "italic and bold");
+        assert_eq!(styles.len(), 2);
+        assert_eq!(styles[0], "0:6:ITALIC");
+        assert_eq!(styles[1], "11:4:BOLD");
     }
 
     #[test]
@@ -2165,15 +2259,6 @@ mod tests {
     }
 
     #[test]
-    fn text_styles_mixed() {
-        let (text, styles) = parse_text_styles("**Bold** and *italic*");
-        assert_eq!(text, "Bold and italic");
-        assert_eq!(styles.len(), 2);
-        assert_eq!(styles[0], "0:4:BOLD");
-        assert_eq!(styles[1], "9:6:ITALIC");
-    }
-
-    #[test]
     fn text_styles_no_formatting() {
         let (text, styles) = parse_text_styles("Plain text, nothing special");
         assert_eq!(text, "Plain text, nothing special");
@@ -2184,7 +2269,14 @@ mod tests {
     fn text_styles_unicode() {
         let (text, styles) = parse_text_styles("**你好** world");
         assert_eq!(text, "你好 world");
-        // "你好" is 6 bytes in UTF-8
         assert_eq!(styles, vec!["0:6:BOLD"]);
+    }
+
+    #[test]
+    fn text_styles_unmatched_markers_pass_through() {
+        // Unmatched markers should be kept as-is
+        let (text, styles) = parse_text_styles("price is $5 * 2 = $10");
+        assert_eq!(text, "price is $5 * 2 = $10");
+        assert!(styles.is_empty());
     }
 }
