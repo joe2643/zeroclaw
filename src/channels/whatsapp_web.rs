@@ -974,9 +974,21 @@ impl Channel for WhatsAppWebChannel {
         }
 
         // Extract @phone mentions from the message content.
-        let mention_re = regex::Regex::new(r"@(\d{8,15})").unwrap();
+        // Strip LID @mentions (14+ digits) from outgoing text — these are
+        // WhatsApp internal IDs that would tag the wrong person or nobody.
+        let lid_re = regex::Regex::new(r"@\d{14,}").unwrap();
+        let clean_content = lid_re.replace_all(&message.content, "").to_string();
+        let clean_content = clean_content
+            .lines()
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Extract @phone mentions from the cleaned content.
+        // Only match 8–13 digit numbers (real phone numbers).
+        let mention_re = regex::Regex::new(r"@(\d{8,13})(?!\d)").unwrap();
         let mentioned_jids: Vec<String> = mention_re
-            .captures_iter(&message.content)
+            .captures_iter(&clean_content)
             .map(|cap| format!("{}@s.whatsapp.net", &cap[1]))
             .collect();
 
@@ -984,14 +996,14 @@ impl Channel for WhatsAppWebChannel {
         // otherwise send as plain conversation.
         let outgoing = if mentioned_jids.is_empty() {
             wa_rs_proto::whatsapp::Message {
-                conversation: Some(message.content.clone()),
+                conversation: Some(clean_content.clone()),
                 ..Default::default()
             }
         } else {
             wa_rs_proto::whatsapp::Message {
                 extended_text_message: Some(Box::new(
                     wa_rs_proto::whatsapp::message::ExtendedTextMessage {
-                        text: Some(message.content.clone()),
+                        text: Some(clean_content.clone()),
                         context_info: Some(Box::new(wa_rs_proto::whatsapp::ContextInfo {
                             mentioned_jid: mentioned_jids,
                             ..Default::default()
