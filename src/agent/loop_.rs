@@ -2332,6 +2332,10 @@ pub(crate) async fn agent_turn(
         activated_tools,
         model_switch_callback,
         &crate::config::PacingConfig::default(),
+        &[],
+        &[],
+        None,
+        0, // no pre-flight compaction in simple agent_turn
     )
     .await
 }
@@ -2642,6 +2646,7 @@ pub(crate) async fn run_tool_call_loop(
     activated_tools: Option<&std::sync::Arc<std::sync::Mutex<crate::tools::ActivatedToolSet>>>,
     model_switch_callback: Option<ModelSwitchCallback>,
     pacing: &crate::config::PacingConfig,
+    max_context_tokens: usize,
 ) -> Result<String> {
     let max_iterations = if max_tool_iterations == 0 {
         DEFAULT_MAX_TOOL_ITERATIONS
@@ -2795,7 +2800,7 @@ pub(crate) async fn run_tool_call_loop(
                                     let desc = result.output.trim();
                                     let desc = truncate_with_ellipsis(desc, 800);
                                     descriptions.push(format!(
-                                        "[Image description: {desc}]",
+                                        "[IMAGE:{image_ref}]\n[Image description: {desc}]",
                                     ));
                                 }
                                 Ok(result) => {
@@ -2805,8 +2810,7 @@ pub(crate) async fn run_tool_call_loop(
                                         "MCP vision fallback returned failure for image"
                                     );
                                     descriptions.push(format!(
-                                        "[Image: could not describe — {}]",
-                                        image_ref
+                                        "[IMAGE:{image_ref}]\n[Image: could not describe]",
                                     ));
                                 }
                                 Err(e) => {
@@ -2816,8 +2820,7 @@ pub(crate) async fn run_tool_call_loop(
                                         "MCP vision fallback failed for image"
                                     );
                                     descriptions.push(format!(
-                                        "[Image: could not describe — {}]",
-                                        image_ref
+                                        "[IMAGE:{image_ref}]\n[Image: could not describe]",
                                     ));
                                 }
                             }
@@ -2852,6 +2855,43 @@ pub(crate) async fn run_tool_call_loop(
                     ),
                 }
                 .into());
+            }
+        }
+
+        // ── Pre-flight context guard: compact if over token budget ──
+        if max_context_tokens > 0 {
+            let estimated = estimate_history_tokens(history);
+            if estimated > max_context_tokens {
+                tracing::info!(
+                    estimated_tokens = estimated,
+                    budget = max_context_tokens,
+                    iteration,
+                    "Pre-flight context guard: history exceeds token budget, compacting"
+                );
+                let compacted = auto_compact_history(
+                    history,
+                    provider,
+                    model,
+                    DEFAULT_MAX_HISTORY_MESSAGES,
+                    max_context_tokens,
+                )
+                .await
+                .unwrap_or(false);
+                if compacted {
+                    tracing::info!("Pre-flight compaction complete within tool loop");
+                } else {
+                    // Compaction did not help — aggressively truncate large tool results
+                    // in older messages to stay within budget.
+                    let still_estimated = estimate_history_tokens(history);
+                    if still_estimated > max_context_tokens {
+                        trim_history(history, DEFAULT_MAX_HISTORY_MESSAGES);
+                        tracing::warn!(
+                            before = still_estimated,
+                            after = estimate_history_tokens(history),
+                            "Fallback hard trim applied in tool loop"
+                        );
+                    }
+                }
             }
         }
 
@@ -4138,6 +4178,28 @@ pub async fn run(
                 }
             }
         }
+        let response = run_tool_call_loop(
+            provider.as_ref(),
+            &mut history,
+            &tools_registry,
+            observer.as_ref(),
+            provider_name,
+            model_name,
+            temperature,
+            false,
+            approval_manager.as_ref(),
+            channel_name,
+            &config.multimodal,
+            config.agent.max_tool_iterations,
+            None,
+            None,
+            None,
+            &excluded_tools,
+            &config.agent.tool_call_dedup_exempt,
+            activated_handle.as_ref(),
+            config.agent.max_context_tokens,
+        )
+        .await?;
         final_output = response.clone();
         println!("{response}");
         observer.record_event(&ObserverEvent::TurnComplete);
@@ -4341,6 +4403,33 @@ pub async fn run(
                         eprintln!("\nError: {e}\n");
                         break String::new();
                     }
+            let response = match run_tool_call_loop(
+                provider.as_ref(),
+                &mut history,
+                &tools_registry,
+                observer.as_ref(),
+                provider_name,
+                model_name,
+                temperature,
+                false,
+                approval_manager.as_ref(),
+                channel_name,
+                &config.multimodal,
+                config.agent.max_tool_iterations,
+                None,
+                None,
+                None,
+                &excluded_tools,
+                &config.agent.tool_call_dedup_exempt,
+                activated_handle.as_ref(),
+                config.agent.max_context_tokens,
+            )
+            .await
+            {
+                Ok(resp) => resp,
+                Err(e) => {
+                    eprintln!("\nError: {e}\n");
+                    continue;
                 }
             };
             final_output = response.clone();
@@ -5204,6 +5293,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect_err("provider without vision support should fail");
@@ -5256,6 +5346,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect_err("oversized payload must fail");
@@ -5301,6 +5392,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("valid multimodal payload should pass");
@@ -5432,6 +5524,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("parallel execution should complete");
@@ -5624,6 +5717,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("loop should finish after deduplicating repeated calls");
@@ -5755,6 +5849,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("loop should finish with exempt tool executing twice");
@@ -5836,6 +5931,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("loop should complete");
@@ -5894,6 +5990,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("native fallback id flow should complete");
@@ -7962,6 +8059,7 @@ Let me check the result."#;
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("tool loop should complete");
