@@ -24,6 +24,7 @@ pub struct ChannelMessage {
     pub observe_group: bool,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for ChannelMessage {
     fn default() -> Self {
         Self {
@@ -209,6 +210,7 @@ mod tests {
                 timestamp: 123,
                 thread_ts: None,
                 interruption_scope_id: None,
+                observe_group: false,
             })
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))
@@ -226,6 +228,7 @@ mod tests {
             timestamp: 999,
             thread_ts: None,
             interruption_scope_id: None,
+            observe_group: false,
         };
 
         let cloned = message.clone();

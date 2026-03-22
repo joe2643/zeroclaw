@@ -531,6 +531,7 @@ impl DelegateTool {
                 None,
                 None,
                 &crate::config::PacingConfig::default(),
+                0, // delegate sub-agent: no pre-flight compaction
             ),
         )
         .await;
