@@ -4293,6 +4293,11 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     .default(true)
                     .interact()?;
 
+                let mention_only = Confirm::new()
+                    .with_prompt("  Mention-only mode? (only respond when @-mentioned in groups)")
+                    .default(true)
+                    .interact()?;
+
                 config.signal = Some(SignalConfig {
                     http_url: http_url.trim_end_matches('/').to_string(),
                     account: account.trim().to_string(),
@@ -4300,6 +4305,8 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     allowed_from,
                     ignore_attachments,
                     ignore_stories,
+                    mention_only,
+                    download_attachments: false,
                     proxy_url: None,
                 });
 
@@ -7549,6 +7556,8 @@ mod tests {
             allowed_from: vec!["*".into()],
             ignore_attachments: false,
             ignore_stories: true,
+            mention_only: false,
+            download_attachments: false,
             proxy_url: None,
         });
         assert!(has_launchable_channels(&channels));

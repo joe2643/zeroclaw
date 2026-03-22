@@ -5544,6 +5544,15 @@ pub struct SignalConfig {
     /// Skip incoming story messages.
     #[serde(default)]
     pub ignore_stories: bool,
+    /// In group chats, only respond when the bot is @-mentioned.
+    /// Non-mentioned group messages are stored as observe-only context.
+    #[serde(default)]
+    pub mention_only: bool,
+    /// Download and expose file attachments (images, documents, audio, video).
+    /// Downloaded files are stored in a temp directory and their path is
+    /// included in the message content as `[Image file: /path]`.
+    #[serde(default)]
+    pub download_attachments: bool,
     /// Per-channel proxy URL (http, https, socks5, socks5h).
     /// Overrides the global `[proxy]` setting for this channel only.
     #[serde(default)]
@@ -10782,6 +10791,8 @@ allowed_users = ["@ops:matrix.org"]
             allowed_from: vec!["+1111111111".into()],
             ignore_attachments: true,
             ignore_stories: false,
+            mention_only: true,
+            download_attachments: false,
             proxy_url: None,
         };
         let json = serde_json::to_string(&sc).unwrap();
@@ -10792,6 +10803,7 @@ allowed_users = ["@ops:matrix.org"]
         assert_eq!(parsed.allowed_from.len(), 1);
         assert!(parsed.ignore_attachments);
         assert!(!parsed.ignore_stories);
+        assert!(parsed.mention_only);
     }
 
     #[test]
@@ -10803,6 +10815,8 @@ allowed_users = ["@ops:matrix.org"]
             allowed_from: vec!["*".into()],
             ignore_attachments: false,
             ignore_stories: true,
+            mention_only: false,
+            download_attachments: false,
             proxy_url: None,
         };
         let toml_str = toml::to_string(&sc).unwrap();
