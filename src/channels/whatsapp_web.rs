@@ -986,7 +986,8 @@ impl Channel for WhatsAppWebChannel {
 
         // Extract @phone mentions from the cleaned content.
         // Only match 8–13 digit numbers (real phone numbers).
-        let mention_re = regex::Regex::new(r"@(\d{8,13})(?!\d)").unwrap();
+        // LID numbers (14+ digits) are already stripped above.
+        let mention_re = regex::Regex::new(r"@(\d{8,13})\b").unwrap();
         let mentioned_jids: Vec<String> = mention_re
             .captures_iter(&clean_content)
             .map(|cap| format!("{}@s.whatsapp.net", &cap[1]))
