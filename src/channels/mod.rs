@@ -5978,7 +5978,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6061,7 +6061,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6158,7 +6158,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 3,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6240,7 +6240,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 2,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6332,7 +6332,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6342,7 +6342,6 @@ BTC is currently around $65,000 based on latest tool output."#
         assert_eq!(sent.len(), 1);
         assert!(sent[0].contains("Provider switched to `openrouter`"));
 
-        let route_key = "telegram_chat-1_alice";
         let route_key = "telegram_chat-1";
         let route = runtime_ctx
             .route_overrides
@@ -6375,7 +6374,6 @@ BTC is currently around $65,000 based on latest tool output."#
         provider_cache_seed.insert("test-provider".to_string(), Arc::clone(&default_provider));
         provider_cache_seed.insert("openrouter".to_string(), routed_provider);
 
-        let route_key = "telegram_chat-1_alice".to_string();
         let route_key = "telegram_chat-1".to_string();
         let mut route_overrides = HashMap::new();
         route_overrides.insert(
@@ -6447,7 +6445,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 2,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6541,7 +6539,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 3,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6650,7 +6648,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 4,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6744,7 +6742,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6828,7 +6826,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 2,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -7029,7 +7027,7 @@ BTC is currently around $65,000 based on latest tool output."#
             timestamp: 1,
             thread_ts: None,
             interruption_scope_id: None,
-                    observe_group: false,
+            observe_group: false,
         })
         .await
         .unwrap();
@@ -7042,7 +7040,7 @@ BTC is currently around $65,000 based on latest tool output."#
             timestamp: 2,
             thread_ts: None,
             interruption_scope_id: None,
-                    observe_group: false,
+            observe_group: false,
         })
         .await
         .unwrap();
@@ -7135,7 +7133,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             })
             .await
             .unwrap();
@@ -7149,7 +7147,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 2,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             })
             .await
             .unwrap();
@@ -7255,7 +7253,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: Some("1741234567.100001".to_string()),
                 interruption_scope_id: Some("1741234567.100001".to_string()),
-                    observe_group: false,
+                observe_group: false,
             })
             .await
             .unwrap();
@@ -7269,7 +7267,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 2,
                 thread_ts: Some("1741234567.100001".to_string()),
                 interruption_scope_id: Some("1741234567.100001".to_string()),
-                    observe_group: false,
+                observe_group: false,
             })
             .await
             .unwrap();
@@ -7372,7 +7370,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             })
             .await
             .unwrap();
@@ -7386,7 +7384,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 2,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             })
             .await
             .unwrap();
@@ -7471,7 +7469,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -7553,7 +7551,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8083,7 +8081,7 @@ BTC is currently around $65,000 based on latest tool output."#
             timestamp: 1,
             thread_ts: None,
             interruption_scope_id: None,
-                    observe_group: false,
+            observe_group: false,
         };
 
         assert_eq!(conversation_memory_key(&msg), "slack_U123_msg_abc123");
@@ -8100,7 +8098,7 @@ BTC is currently around $65,000 based on latest tool output."#
             timestamp: 1,
             thread_ts: Some("1741234567.123456".into()),
             interruption_scope_id: None,
-                    observe_group: false,
+            observe_group: false,
         };
 
         assert_eq!(
@@ -8120,7 +8118,7 @@ BTC is currently around $65,000 based on latest tool output."#
             timestamp: 1,
             thread_ts: None,
             interruption_scope_id: None,
-                    observe_group: false,
+            observe_group: false,
         };
 
         assert_eq!(followup_thread_id(&msg).as_deref(), Some("msg_abc123"));
@@ -8137,7 +8135,7 @@ BTC is currently around $65,000 based on latest tool output."#
             timestamp: 1,
             thread_ts: None,
             interruption_scope_id: None,
-                    observe_group: false,
+            observe_group: false,
         };
         let msg2 = traits::ChannelMessage {
             id: "msg_2".into(),
@@ -8148,7 +8146,7 @@ BTC is currently around $65,000 based on latest tool output."#
             timestamp: 2,
             thread_ts: None,
             interruption_scope_id: None,
-                    observe_group: false,
+            observe_group: false,
         };
 
         assert_ne!(
@@ -8171,7 +8169,7 @@ BTC is currently around $65,000 based on latest tool output."#
             timestamp: 1,
             thread_ts: None,
             interruption_scope_id: None,
-                    observe_group: false,
+            observe_group: false,
         };
         let msg2 = traits::ChannelMessage {
             id: "msg_2".into(),
@@ -8182,7 +8180,7 @@ BTC is currently around $65,000 based on latest tool output."#
             timestamp: 2,
             thread_ts: None,
             interruption_scope_id: None,
-                    observe_group: false,
+            observe_group: false,
         };
 
         mem.store(
@@ -8332,7 +8330,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8349,7 +8347,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 2,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8641,7 +8639,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8751,7 +8749,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9326,7 +9324,7 @@ This is an example JSON object for profile settings."#;
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9414,7 +9412,7 @@ This is an example JSON object for profile settings."#;
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9431,7 +9429,7 @@ This is an example JSON object for profile settings."#;
                 timestamp: 2,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9579,7 +9577,7 @@ This is an example JSON object for profile settings."#;
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9692,7 +9690,7 @@ This is an example JSON object for profile settings."#;
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9797,7 +9795,7 @@ This is an example JSON object for profile settings."#;
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9922,7 +9920,7 @@ This is an example JSON object for profile settings."#;
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
-                    observe_group: false,
+                observe_group: false,
             },
             CancellationToken::new(),
         )

@@ -2669,7 +2669,7 @@ impl Channel for SlackChannel {
                             .as_secs(),
                         thread_ts: Some(thread_ts.clone()),
                         interruption_scope_id: Some(thread_ts.clone()),
-                    observe_group: false,
+                        observe_group: false,
                     };
 
                     if tx.send(channel_msg).await.is_err() {

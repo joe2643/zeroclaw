@@ -124,11 +124,7 @@ impl RetrievalPipeline {
     /// Call external reranker server to reorder results by relevance.
     ///
     /// Falls back to original order on any error.
-    async fn rerank_results(
-        &self,
-        query: &str,
-        results: Vec<MemoryEntry>,
-    ) -> Vec<MemoryEntry> {
+    async fn rerank_results(&self, query: &str, results: Vec<MemoryEntry>) -> Vec<MemoryEntry> {
         let url = match &self.config.rerank_url {
             Some(u) if !u.is_empty() => u.clone(),
             _ => return results,

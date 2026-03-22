@@ -1159,6 +1159,7 @@ impl Channel for WhatsAppWebChannel {
                                         }
                                         // self_chat_mode=true: always process, skip further policy checks
                                     } else if is_group {
+                                        #[allow(clippy::match_same_arms)]
                                         match wa_group_policy {
                                             crate::config::WhatsAppChatPolicy::Ignore => {
                                                 tracing::debug!(
@@ -1175,6 +1176,7 @@ impl Channel for WhatsAppWebChannel {
                                         }
                                     } else {
                                         // DM (non-self)
+                                        #[allow(clippy::match_same_arms)]
                                         match wa_dm_policy {
                                             crate::config::WhatsAppChatPolicy::Ignore => {
                                                 tracing::debug!(
@@ -1850,6 +1852,7 @@ mod tests {
         // attempt 1 → 3s, 2 → 6s, 3 → 12s, … 7 → 192s, 8 → 300s (capped)
         let expected = [3, 6, 12, 24, 48, 96, 192, 300, 300, 300];
         for (i, &want) in expected.iter().enumerate() {
+            #[allow(clippy::cast_possible_truncation)]
             let attempt = (i + 1) as u32;
             assert_eq!(
                 WhatsAppWebChannel::compute_retry_delay(attempt),
