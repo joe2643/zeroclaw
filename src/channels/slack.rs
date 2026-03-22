@@ -2585,7 +2585,7 @@ impl Channel for SlackChannel {
                             },
                             interruption_scope_id: Self::inbound_interruption_scope_id(msg, ts),
                             thread_ts: Self::inbound_thread_ts(msg, ts),
-                    observe_group: false,
+                            observe_group: false,
                         };
 
                         if tx.send(channel_msg).await.is_err() {
@@ -2672,6 +2672,7 @@ impl Channel for SlackChannel {
                         thread_ts: Some(thread_ts.clone()),
                         interruption_scope_id: Some(thread_ts.clone()),
                     observe_group: false,
+                        observe_group: false,
                     };
 
                     if tx.send(channel_msg).await.is_err() {
