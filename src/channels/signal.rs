@@ -598,6 +598,11 @@ impl SignalChannel {
         }
     }
 
+    /// Parse `@<phone>` patterns in outgoing text into signal-cli mention format.
+    fn parse_outgoing_mentions(text: &str) -> (String, Vec<String>) {
+        parse_outgoing_mentions_impl(text)
+    }
+
     fn process_envelope_parts(&self, envelope: &Envelope) -> Option<ProcessedEnvelope> {
         // Skip story messages when configured
         if self.ignore_stories && envelope.story_message.is_some() {
@@ -719,6 +724,55 @@ impl SignalChannel {
     }
 }
 
+/// Regex-like scan for `@<phone_number>` patterns in outgoing text.
+/// Returns the cleaned text (with @number replaced by a placeholder char)
+/// and a list of signal-cli mention strings in `"start:length:number"` format.
+fn parse_outgoing_mentions_impl(text: &str) -> (String, Vec<String>) {
+    let mut result = String::with_capacity(text.len());
+    let mut mentions = Vec::new();
+    let mut chars = text.char_indices().peekable();
+
+    while let Some((i, ch)) = chars.next() {
+        if ch == '@' {
+            // Try to parse a phone number after @
+            let rest = &text[i + 1..];
+            // Match optional '+' then digits (at least 6 chars for a phone number)
+            let num_end = rest
+                .char_indices()
+                .take_while(|(j, c)| {
+                    c.is_ascii_digit() || (*j == 0 && *c == '+')
+                })
+                .last()
+                .map(|(j, c)| j + c.len_utf8())
+                .unwrap_or(0);
+
+            if num_end >= 6 {
+                let number_raw = &rest[..num_end];
+                let number = if number_raw.starts_with('+') {
+                    number_raw.to_string()
+                } else {
+                    format!("+{number_raw}")
+                };
+
+                // Insert OBJECT REPLACEMENT CHARACTER as mention placeholder
+                let start = result.len();
+                result.push('\u{FFFC}');
+                let length = '\u{FFFC}'.len_utf8();
+                mentions.push(format!("{start}:{length}:{number}"));
+
+                // Skip past the number in the input
+                for _ in 0..num_end {
+                    chars.next();
+                }
+                continue;
+            }
+        }
+        result.push(ch);
+    }
+
+    (result, mentions)
+}
+
 fn truncate_reply_preview(text: &str, max_chars: usize) -> String {
     let normalized: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.chars().count() <= max_chars {
@@ -736,18 +790,26 @@ impl Channel for SignalChannel {
     }
 
     async fn send(&self, message: &SendMessage) -> anyhow::Result<()> {
-        let params = match Self::parse_recipient_target(&message.recipient) {
+        // Parse @<phone> mentions from the outgoing message and convert them
+        // to signal-cli native mention parameters.
+        let (text, mentions) = Self::parse_outgoing_mentions(&message.content);
+
+        let mut params = match Self::parse_recipient_target(&message.recipient) {
             RecipientTarget::Direct(number) => serde_json::json!({
                 "recipient": [number],
-                "message": &message.content,
+                "message": text,
                 "account": &self.account,
             }),
             RecipientTarget::Group(group_id) => serde_json::json!({
                 "groupId": group_id,
-                "message": &message.content,
+                "message": text,
                 "account": &self.account,
             }),
         };
+
+        if !mentions.is_empty() {
+            params["mentions"] = serde_json::json!(mentions);
+        }
 
         self.rpc_request("send", params).await?;
         Ok(())
@@ -1909,5 +1971,46 @@ mod tests {
         assert!(env.data_message.is_none());
         assert!(env.story_message.is_none());
         assert!(env.timestamp.is_none());
+    }
+
+    // ── outgoing mention parsing tests ────────────────────────────
+
+    #[test]
+    fn parse_outgoing_mentions_with_plus() {
+        let (text, mentions) = parse_outgoing_mentions_impl("Hello @+85251159218 how are you?");
+        assert_eq!(mentions.len(), 1);
+        assert!(mentions[0].ends_with(":+85251159218"));
+        assert!(text.contains('\u{FFFC}'));
+        assert!(!text.contains("85251159218"));
+    }
+
+    #[test]
+    fn parse_outgoing_mentions_without_plus() {
+        let (text, mentions) = parse_outgoing_mentions_impl("Hey @85266829736 check this");
+        assert_eq!(mentions.len(), 1);
+        assert!(mentions[0].ends_with(":+85266829736"));
+        assert!(text.contains('\u{FFFC}'));
+    }
+
+    #[test]
+    fn parse_outgoing_mentions_multiple() {
+        let (_, mentions) =
+            parse_outgoing_mentions_impl("@85251159218 and @+85266829736 look at this");
+        assert_eq!(mentions.len(), 2);
+    }
+
+    #[test]
+    fn parse_outgoing_mentions_no_mention() {
+        let (text, mentions) = parse_outgoing_mentions_impl("Just normal text, no mentions");
+        assert!(mentions.is_empty());
+        assert_eq!(text, "Just normal text, no mentions");
+    }
+
+    #[test]
+    fn parse_outgoing_mentions_short_number_ignored() {
+        // Numbers shorter than 6 digits should not be treated as phone mentions
+        let (text, mentions) = parse_outgoing_mentions_impl("price is @1234");
+        assert!(mentions.is_empty());
+        assert_eq!(text, "price is @1234");
     }
 }

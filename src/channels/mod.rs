@@ -618,6 +618,17 @@ fn channel_delivery_instructions(channel_name: &str) -> Option<&'static str> {
              - Voice supports .wav, .mp3, .silk formats only. Other audio formats use [DOCUMENT:]\n\
              - Keep normal text outside markers and never wrap markers in code fences.\n",
         ),
+        "signal" => Some(
+            "When responding on Signal:\n\
+             - Be concise and conversational.\n\
+             - Use Markdown-style formatting: **bold**, *italic*, `code`.\n\
+             - To mention/tag someone, write @<phone_number> (e.g. @85251159218). \
+               The system will convert this to a native Signal mention.\n\
+             - When you see [Mentioned: +<phone>], someone was @-mentioned in the group.\n\
+             - When you see [Replying to: \"...\"], the user is replying to a previous message.\n\
+             - When you see [Image file: /path], an image was shared. Describe what you see if relevant.\n\
+             - When you receive a voice message transcription, respond naturally as in conversation.\n",
+        ),
         "whatsapp" => Some(
             "When responding on WhatsApp:\n\
              - Be concise and conversational.\n\
