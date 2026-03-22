@@ -617,6 +617,16 @@ fn channel_delivery_instructions(channel_name: &str) -> Option<&'static str> {
                [VIDEO:<path-or-url>], [VOICE:<path-or-url>]\n\
              - Voice supports .wav, .mp3, .silk formats only. Other audio formats use [DOCUMENT:]\n\
              - Keep normal text outside markers and never wrap markers in code fences.\n",
+        "whatsapp" => Some(
+            "When responding on WhatsApp:\n\
+             - Be concise and conversational.\n\
+             - To mention/tag someone in a group, write @<phone_number> (e.g. @85251159218). \
+               The number is visible in the sender field of each message in the conversation. \
+               The mention will be rendered as a native WhatsApp @mention.\n\
+             - In group chats, the conversation history includes messages from all participants. \
+               Each message shows who sent it via the sender field.\n\
+             - When you see [IMAGE:<path>] with [Image description: ...], an image was shared and described for you.\n\
+             - When you see [Replying to: \"...\"], the user is replying to a previous message.",
         ),
         _ => None,
     }
@@ -1248,6 +1258,7 @@ fn is_context_window_overflow_error(err: &anyhow::Error) -> bool {
         "token limit exceeded",
         "prompt is too long",
         "input is too long",
+        "prompt exceeds max length",
     ]
     .iter()
     .any(|hint| lower.contains(hint))
@@ -2540,6 +2551,39 @@ async fn process_channel_message(
         }
 
         break loop_result;
+    let timeout_budget_secs =
+        channel_message_timeout_budget_secs(ctx.message_timeout_secs, ctx.max_tool_iterations);
+    let llm_result = tokio::select! {
+        () = cancellation_token.cancelled() => LlmExecutionResult::Cancelled,
+        result = tokio::time::timeout(
+            Duration::from_secs(timeout_budget_secs),
+            run_tool_call_loop(
+                active_provider.as_ref(),
+                &mut history,
+                ctx.tools_registry.as_ref(),
+                notify_observer.as_ref() as &dyn Observer,
+                route.provider.as_str(),
+                route.model.as_str(),
+                runtime_defaults.temperature,
+                true,
+                Some(&*ctx.approval_manager),
+                msg.channel.as_str(),
+                &ctx.multimodal,
+                ctx.max_tool_iterations,
+                Some(cancellation_token.clone()),
+                delta_tx,
+                ctx.hooks.as_deref(),
+                if msg.channel == "cli" {
+                    &[]
+                } else {
+                    ctx.non_cli_excluded_tools.as_ref()
+                },
+                ctx.tool_call_dedup_exempt.as_ref(),
+                ctx.activated_tools.as_ref(),
+                // Pre-flight context guard: use char-budget / 4 as token estimate
+                PROACTIVE_CONTEXT_BUDGET_CHARS / 4,
+            ),
+        ) => LlmExecutionResult::Completed(result),
     };
 
     if let Some(handle) = draft_updater {
