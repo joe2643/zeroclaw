@@ -742,7 +742,7 @@ fn strip_tool_result_content(text: &str) -> String {
 fn supports_runtime_model_switch(channel_name: &str) -> bool {
     matches!(
         channel_name,
-        "telegram" | "discord" | "matrix" | "whatsapp" | "whatsapp_web"
+        "telegram" | "discord" | "matrix" | "signal" | "whatsapp" | "whatsapp_web"
     )
 }
 
