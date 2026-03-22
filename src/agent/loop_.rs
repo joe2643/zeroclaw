@@ -2337,9 +2337,6 @@ pub(crate) async fn agent_turn(
         activated_tools,
         model_switch_callback,
         &crate::config::PacingConfig::default(),
-        &[],
-        &[],
-        None,
         0, // no pre-flight compaction in simple agent_turn
     )
     .await
@@ -3514,7 +3511,6 @@ pub(crate) async fn run_tool_call_loop(
             if !loop_ignore_tools.contains(tool_name.as_str()) {
                 detection_relevant_output.push_str(&outcome.output);
             }
-            individual_results.push((tool_call_id, outcome.output.clone()));
             let output = if outcome.output.len() > MAX_TOOL_RESULT_CHARS {
                 tracing::warn!(
                     tool = %tool_name,
@@ -4134,6 +4130,7 @@ pub async fn run(
                 activated_handle.as_ref(),
                 Some(model_switch_callback.clone()),
                 &config.pacing,
+                config.agent.max_context_tokens,
             )
             .await
             {
@@ -4203,12 +4200,13 @@ pub async fn run(
             &mut history,
             &tools_registry,
             observer.as_ref(),
-            provider_name,
-            model_name,
+            &provider_name,
+            &model_name,
             temperature,
             false,
             approval_manager.as_ref(),
             channel_name,
+            None,
             &config.multimodal,
             config.agent.max_tool_iterations,
             None,
@@ -4217,6 +4215,8 @@ pub async fn run(
             &excluded_tools,
             &config.agent.tool_call_dedup_exempt,
             activated_handle.as_ref(),
+            None,
+            &config.pacing,
             config.agent.max_context_tokens,
         )
         .await?;
@@ -4384,6 +4384,7 @@ pub async fn run(
                     activated_handle.as_ref(),
                     Some(model_switch_callback.clone()),
                     &config.pacing,
+                    config.agent.max_context_tokens,
                 )
                 .await
                 {
@@ -4423,33 +4424,6 @@ pub async fn run(
                         eprintln!("\nError: {e}\n");
                         break String::new();
                     }
-            let response = match run_tool_call_loop(
-                provider.as_ref(),
-                &mut history,
-                &tools_registry,
-                observer.as_ref(),
-                provider_name,
-                model_name,
-                temperature,
-                false,
-                approval_manager.as_ref(),
-                channel_name,
-                &config.multimodal,
-                config.agent.max_tool_iterations,
-                None,
-                None,
-                None,
-                &excluded_tools,
-                &config.agent.tool_call_dedup_exempt,
-                activated_handle.as_ref(),
-                config.agent.max_context_tokens,
-            )
-            .await
-            {
-                Ok(resp) => resp,
-                Err(e) => {
-                    eprintln!("\nError: {e}\n");
-                    continue;
                 }
             };
             final_output = response.clone();
@@ -5616,6 +5590,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("cron_add delivery defaults should be injected");
@@ -5679,6 +5654,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("explicit delivery mode should be preserved");
@@ -6094,6 +6070,7 @@ mod tests {
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("native tool-call text should be relayed through on_delta");
@@ -8229,6 +8206,7 @@ Let me check the result."#;
                     None,
                     None,
                     &crate::config::PacingConfig::default(),
+                    0,
                 ),
             )
             .await
@@ -8308,6 +8286,7 @@ Let me check the result."#;
                     None,
                     None,
                     &crate::config::PacingConfig::default(),
+                    0,
                 ),
             )
             .await
@@ -8363,6 +8342,7 @@ Let me check the result."#;
             None,
             None,
             &crate::config::PacingConfig::default(),
+            0,
         )
         .await
         .expect("should succeed without cost scope");

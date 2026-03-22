@@ -634,7 +634,9 @@ fn resolve_minimax_oauth_refresh_token(name: &str) -> Option<String> {
 }
 
 pub(crate) fn canonical_china_provider_name(name: &str) -> Option<&'static str> {
-    if is_qwen_alias(name) {
+    if is_bailian_alias(name) {
+        Some("bailian")
+    } else if is_qwen_alias(name) {
         Some("qwen")
     } else if is_glm_alias(name) {
         Some("glm")
@@ -648,8 +650,6 @@ pub(crate) fn canonical_china_provider_name(name: &str) -> Option<&'static str> 
         Some("qianfan")
     } else if is_doubao_alias(name) {
         Some("doubao")
-    } else if is_bailian_alias(name) {
-        Some("bailian")
     } else {
         None
     }
@@ -1325,10 +1325,6 @@ fn create_provider_with_url_and_options(
                 true,
             )
         )),
-        name if is_qwen_coding_alias(name) && qwen_base_url(name).is_some() => {
-            Ok(compat(OpenAiCompatibleProvider::new_no_responses_fallback(
-                "Qwen Coding",
-                qwen_base_url(name).expect("checked in guard"),
         name if is_qwen_coding_alias(name) => {
             // Alibaba Coding Plan uses Anthropic Messages API format,
             // not OpenAI Chat Completions.
@@ -1989,6 +1985,9 @@ pub fn list_providers() -> Vec<ProviderInfo> {
             name: "bailian",
             display_name: "Bailian (Aliyun)",
             aliases: &["aliyun-bailian", "aliyun"],
+            local: false,
+        },
+        ProviderInfo {
             name: "qwen-coding",
             display_name: "Qwen Coding (ModelStudio / coding-intl)",
             aliases: &[

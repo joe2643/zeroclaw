@@ -269,7 +269,6 @@ impl LinqChannel {
             thread_ts: None,
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         });
 
         messages

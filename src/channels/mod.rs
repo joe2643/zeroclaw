@@ -427,14 +427,6 @@ fn conversation_memory_key(msg: &traits::ChannelMessage) -> String {
 }
 
 fn conversation_history_key(msg: &traits::ChannelMessage) -> String {
-    // Include reply_target for per-channel isolation (e.g. distinct Discord/Slack
-    // channels) and thread_ts for per-topic isolation in forum groups.
-    match &msg.thread_ts {
-        Some(tid) => format!(
-            "{}_{}_{}_{}",
-            msg.channel, msg.reply_target, tid, msg.sender
-        ),
-        None => format!("{}_{}_{}", msg.channel, msg.reply_target, msg.sender),
     // Key by reply_target (chat JID / channel ID) so each group and DM
     // gets an independent session.  Include thread_ts for per-topic
     // isolation in forum groups.
@@ -620,6 +612,7 @@ fn channel_delivery_instructions(channel_name: &str) -> Option<&'static str> {
                [VIDEO:<path-or-url>], [VOICE:<path-or-url>]\n\
              - Voice supports .wav, .mp3, .silk formats only. Other audio formats use [DOCUMENT:]\n\
              - Keep normal text outside markers and never wrap markers in code fences.\n",
+        ),
         "whatsapp" => Some(
             "When responding on WhatsApp:\n\
              - Be concise and conversational.\n\
@@ -1529,8 +1522,6 @@ async fn handle_runtime_command_if_needed(
                     current.provider = route.provider.clone();
                     current.model = route.model.clone();
                     current.api_key = route.api_key.clone();
-                    current.max_context_tokens =
-                        route.max_context_tokens.unwrap_or(ctx.max_context_tokens);
                 } else {
                     current.model = model.clone();
                 }
@@ -2522,6 +2513,7 @@ async fn process_channel_message(
                     ctx.activated_tools.as_ref(),
                     Some(model_switch_callback.clone()),
                     &ctx.pacing,
+                    ctx.prompt_config.agent.max_context_tokens,
                 ),
                 ),
             ) => LlmExecutionResult::Completed(result),
@@ -2570,39 +2562,6 @@ async fn process_channel_message(
         }
 
         break loop_result;
-    let timeout_budget_secs =
-        channel_message_timeout_budget_secs(ctx.message_timeout_secs, ctx.max_tool_iterations);
-    let llm_result = tokio::select! {
-        () = cancellation_token.cancelled() => LlmExecutionResult::Cancelled,
-        result = tokio::time::timeout(
-            Duration::from_secs(timeout_budget_secs),
-            run_tool_call_loop(
-                active_provider.as_ref(),
-                &mut history,
-                ctx.tools_registry.as_ref(),
-                notify_observer.as_ref() as &dyn Observer,
-                route.provider.as_str(),
-                route.model.as_str(),
-                runtime_defaults.temperature,
-                true,
-                Some(&*ctx.approval_manager),
-                msg.channel.as_str(),
-                &ctx.multimodal,
-                ctx.max_tool_iterations,
-                Some(cancellation_token.clone()),
-                delta_tx,
-                ctx.hooks.as_deref(),
-                if msg.channel == "cli" {
-                    &[]
-                } else {
-                    ctx.non_cli_excluded_tools.as_ref()
-                },
-                ctx.tool_call_dedup_exempt.as_ref(),
-                ctx.activated_tools.as_ref(),
-                // Pre-flight context guard: use char-budget / 4 as token estimate
-                PROACTIVE_CONTEXT_BUDGET_CHARS / 4,
-            ),
-        ) => LlmExecutionResult::Completed(result),
     };
 
     if let Some(handle) = draft_updater {
@@ -5182,7 +5141,6 @@ mod tests {
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         };
 
         assert!(compact_sender_history(&ctx, &sender));
@@ -5300,7 +5258,6 @@ mod tests {
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         };
 
         append_sender_turn(&ctx, &sender, ChatMessage::user("hello"));
@@ -5374,7 +5331,6 @@ mod tests {
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         };
 
         assert!(rollback_orphan_user_turn(&ctx, &sender, "pending"));
@@ -5467,7 +5423,6 @@ mod tests {
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         };
 
         assert!(rollback_orphan_user_turn(
@@ -6010,7 +5965,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6025,7 +5979,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6095,7 +6048,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6110,7 +6062,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6126,7 +6077,6 @@ BTC is currently around $65,000 based on latest tool output."#
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let turns = histories
-            .get("telegram_chat-telegram_alice")
             .get("telegram_chat-telegram")
             .expect("telegram history should be stored");
         let assistant_turn = turns
@@ -6195,7 +6145,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6210,7 +6159,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6279,7 +6227,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6294,7 +6241,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6373,7 +6319,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6388,7 +6333,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6440,7 +6384,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 provider: "openrouter".to_string(),
                 model: "route-model".to_string(),
                 api_key: None,
-                max_context_tokens: 32_000,
             },
         );
 
@@ -6491,7 +6434,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6506,7 +6448,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6587,7 +6528,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6602,7 +6542,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6698,7 +6637,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6713,7 +6651,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6794,7 +6731,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6809,7 +6745,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -6880,7 +6815,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -6895,7 +6829,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -7084,7 +7017,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(4);
@@ -7098,7 +7030,6 @@ BTC is currently around $65,000 based on latest tool output."#
             thread_ts: None,
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         })
         .await
         .unwrap();
@@ -7112,7 +7043,6 @@ BTC is currently around $65,000 based on latest tool output."#
             thread_ts: None,
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         })
         .await
         .unwrap();
@@ -7192,7 +7122,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -7207,7 +7136,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             })
             .await
             .unwrap();
@@ -7222,7 +7150,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             })
             .await
             .unwrap();
@@ -7313,7 +7240,6 @@ BTC is currently around $65,000 based on latest tool output."#
             )),
             activated_tools: None,
             cost_tracking: None,
-            max_context_tokens: 32_000,
             query_classification: crate::config::QueryClassificationConfig::default(),
             pacing: crate::config::PacingConfig::default(),
         });
@@ -7330,7 +7256,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: Some("1741234567.100001".to_string()),
                 interruption_scope_id: Some("1741234567.100001".to_string()),
                     observe_group: false,
-                observe_group: false,
             })
             .await
             .unwrap();
@@ -7345,7 +7270,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: Some("1741234567.100001".to_string()),
                 interruption_scope_id: Some("1741234567.100001".to_string()),
                     observe_group: false,
-                observe_group: false,
             })
             .await
             .unwrap();
@@ -7435,7 +7359,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -7450,7 +7373,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             })
             .await
             .unwrap();
@@ -7465,7 +7387,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             })
             .await
             .unwrap();
@@ -7537,7 +7458,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -7552,7 +7472,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -7621,7 +7540,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -7636,7 +7554,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8167,7 +8084,6 @@ BTC is currently around $65,000 based on latest tool output."#
             thread_ts: None,
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         };
 
         assert_eq!(conversation_memory_key(&msg), "slack_U123_msg_abc123");
@@ -8185,7 +8101,6 @@ BTC is currently around $65,000 based on latest tool output."#
             thread_ts: Some("1741234567.123456".into()),
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         };
 
         assert_eq!(
@@ -8206,7 +8121,6 @@ BTC is currently around $65,000 based on latest tool output."#
             thread_ts: None,
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         };
 
         assert_eq!(followup_thread_id(&msg).as_deref(), Some("msg_abc123"));
@@ -8224,7 +8138,6 @@ BTC is currently around $65,000 based on latest tool output."#
             thread_ts: None,
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         };
         let msg2 = traits::ChannelMessage {
             id: "msg_2".into(),
@@ -8236,7 +8149,6 @@ BTC is currently around $65,000 based on latest tool output."#
             thread_ts: None,
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         };
 
         assert_ne!(
@@ -8260,7 +8172,6 @@ BTC is currently around $65,000 based on latest tool output."#
             thread_ts: None,
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         };
         let msg2 = traits::ChannelMessage {
             id: "msg_2".into(),
@@ -8272,7 +8183,6 @@ BTC is currently around $65,000 based on latest tool output."#
             thread_ts: None,
             interruption_scope_id: None,
                     observe_group: false,
-            observe_group: false,
         };
 
         mem.store(
@@ -8409,7 +8319,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -8424,7 +8333,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8442,7 +8350,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8559,6 +8466,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 1,
                 thread_ts: None,
                 interruption_scope_id: None,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8591,6 +8499,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 2,
                 thread_ts: None,
                 interruption_scope_id: None,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8602,7 +8511,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             assert!(
-                !histories.contains_key("telegram_chat-refresh_alice"),
+                !histories.contains_key("telegram_chat-refresh"),
                 "/new should clear the cached sender history before the next message"
             );
         }
@@ -8613,7 +8522,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             assert!(
-                pending_new_sessions.contains("telegram_chat-refresh_alice"),
+                pending_new_sessions.contains("telegram_chat-refresh"),
                 "/new should mark the sender for a fresh next-message prompt rebuild"
             );
         }
@@ -8629,6 +8538,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 timestamp: 3,
                 thread_ts: None,
                 interruption_scope_id: None,
+                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8718,7 +8628,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -8733,7 +8642,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -8757,8 +8665,6 @@ BTC is currently around $65,000 based on latest tool output."#
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let turns = histories
-            .get("test-channel_chat-ctx_alice")
-            .expect("history should be stored for sender");
             .get("test-channel_chat-ctx")
             .expect("history should be stored for chat");
         assert_eq!(turns[0].role, "user");
@@ -8777,7 +8683,6 @@ BTC is currently around $65,000 based on latest tool output."#
         let provider_impl = Arc::new(HistoryCaptureProvider::default());
         let mut histories = HashMap::new();
         histories.insert(
-            "telegram_chat-telegram_alice".to_string(),
             "telegram_chat-telegram".to_string(),
             vec![
                 ChatMessage::assistant("stale assistant"),
@@ -8833,7 +8738,6 @@ BTC is currently around $65,000 based on latest tool output."#
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -8848,7 +8752,6 @@ BTC is currently around $65,000 based on latest tool output."#
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9409,7 +9312,6 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         // Simulate a photo attachment message with [IMAGE:] marker.
@@ -9425,7 +9327,6 @@ This is an example JSON object for profile settings."#;
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9500,7 +9401,6 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -9515,7 +9415,6 @@ This is an example JSON object for profile settings."#;
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9533,7 +9432,6 @@ This is an example JSON object for profile settings."#;
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9558,8 +9456,6 @@ This is an example JSON object for profile settings."#;
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let turns = histories
-            .get("test-channel_chat-photo_zeroclaw_user")
-            .expect("history should exist for sender");
             .get("test-channel_chat-photo")
             .expect("history should exist for chat");
         assert_eq!(turns.len(), 2);
@@ -9621,7 +9517,6 @@ This is an example JSON object for profile settings."#;
             provider: "vision-provider".into(),
             model: "gpt-4-vision".into(),
             api_key: None,
-            max_context_tokens: None,
         }];
 
         let runtime_ctx = Arc::new(ChannelRuntimeContext {
@@ -9671,7 +9566,6 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -9686,7 +9580,6 @@ This is an example JSON object for profile settings."#;
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9737,7 +9630,6 @@ This is an example JSON object for profile settings."#;
             provider: "vision-provider".into(),
             model: "gpt-4-vision".into(),
             api_key: None,
-            max_context_tokens: None,
         }];
 
         let runtime_ctx = Arc::new(ChannelRuntimeContext {
@@ -9787,7 +9679,6 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -9802,7 +9693,6 @@ This is an example JSON object for profile settings."#;
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9845,7 +9735,6 @@ This is an example JSON object for profile settings."#;
             provider: "vision-provider".into(),
             model: "gpt-4-vision".into(),
             api_key: None,
-            max_context_tokens: None,
         }];
 
         let runtime_ctx = Arc::new(ChannelRuntimeContext {
@@ -9895,7 +9784,6 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -9910,7 +9798,6 @@ This is an example JSON object for profile settings."#;
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -9966,14 +9853,12 @@ This is an example JSON object for profile settings."#;
                 provider: "fast-provider".into(),
                 model: "fast-model".into(),
                 api_key: None,
-                max_context_tokens: None,
             },
             crate::config::ModelRouteConfig {
                 hint: "code".into(),
                 provider: "code-provider".into(),
                 model: "code-model".into(),
                 api_key: None,
-                max_context_tokens: None,
             },
         ];
 
@@ -10024,7 +9909,6 @@ This is an example JSON object for profile settings."#;
             activated_tools: None,
             cost_tracking: None,
             pacing: crate::config::PacingConfig::default(),
-            max_context_tokens: 32_000,
         });
 
         process_channel_message(
@@ -10039,7 +9923,6 @@ This is an example JSON object for profile settings."#;
                 thread_ts: None,
                 interruption_scope_id: None,
                     observe_group: false,
-                observe_group: false,
             },
             CancellationToken::new(),
         )
@@ -10197,6 +10080,7 @@ This is an example JSON object for profile settings."#;
             timestamp: 0,
             thread_ts: None,
             interruption_scope_id: None,
+            observe_group: false,
         };
         assert_eq!(interruption_scope_key(&msg), "matrix_room_alice");
     }
@@ -10212,6 +10096,7 @@ This is an example JSON object for profile settings."#;
             timestamp: 0,
             thread_ts: Some("$thread1".into()),
             interruption_scope_id: Some("$thread1".into()),
+            observe_group: false,
         };
         assert_eq!(interruption_scope_key(&msg), "matrix_room_alice_$thread1");
     }
@@ -10228,6 +10113,7 @@ This is an example JSON object for profile settings."#;
             timestamp: 0,
             thread_ts: Some("1234567890.000100".into()), // Slack top-level fallback
             interruption_scope_id: None,                 // but NOT a thread reply
+            observe_group: false,
         };
         assert_eq!(interruption_scope_key(&msg), "slack_C123_alice");
     }
@@ -10304,6 +10190,7 @@ This is an example JSON object for profile settings."#;
                 timestamp: 1,
                 thread_ts: Some("1741234567.100001".to_string()),
                 interruption_scope_id: Some("1741234567.100001".to_string()),
+                observe_group: false,
             })
             .await
             .unwrap();
@@ -10317,6 +10204,7 @@ This is an example JSON object for profile settings."#;
                 timestamp: 2,
                 thread_ts: Some("1741234567.200002".to_string()),
                 interruption_scope_id: Some("1741234567.200002".to_string()),
+                observe_group: false,
             })
             .await
             .unwrap();

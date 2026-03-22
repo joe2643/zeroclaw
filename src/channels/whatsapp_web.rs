@@ -1365,6 +1365,7 @@ impl Channel for WhatsAppWebChannel {
                                                         content,
                                                         timestamp: chrono::Utc::now().timestamp().cast_unsigned(),
                                                         thread_ts: None,
+                                                        interruption_scope_id: None,
                                                         observe_group: true,
                                                     })
                                                     .await;
