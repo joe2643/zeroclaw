@@ -501,10 +501,15 @@ impl SignalChannel {
         attachment: &serde_json::Value,
     ) -> anyhow::Result<Option<PathBuf>> {
         if let Some(path) = Self::attachment_file_path(attachment) {
+            tracing::debug!("Signal attachment found local file: {}", path.display());
             return Ok(Some(path));
         }
 
         let Some(attachment_id) = Self::attachment_id(attachment).map(str::trim) else {
+            tracing::debug!(
+                "Signal attachment has no id: {}",
+                serde_json::to_string(attachment).unwrap_or_default()
+            );
             return Ok(None);
         };
         if attachment_id.is_empty() {
@@ -532,12 +537,34 @@ impl SignalChannel {
             .rpc_request("getAttachment", params)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Signal getAttachment returned no result"))?;
-        let encoded = result
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Signal getAttachment result was not a string"))?;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .map_err(|err| anyhow::anyhow!("invalid base64 attachment payload: {err}"))?;
+
+        // signal-cli may return:
+        //   - a plain base64 string (older versions)
+        //   - an object with a "file" or "path" field (newer versions)
+        let bytes = if let Some(encoded) = result.as_str() {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|err| anyhow::anyhow!("invalid base64 attachment payload: {err}"))?
+        } else if let Some(file_path) = result
+            .get("file")
+            .or_else(|| result.get("path"))
+            .and_then(|v| v.as_str())
+        {
+            // Newer signal-cli returns {"file": "/path/to/attachment"}
+            let local = PathBuf::from(file_path);
+            if local.exists() {
+                return Ok(Some(local));
+            }
+            anyhow::bail!(
+                "Signal getAttachment returned file path that does not exist: {file_path}"
+            );
+        } else {
+            tracing::warn!(
+                "Signal getAttachment unexpected result type: {}",
+                serde_json::to_string(&result).unwrap_or_default()
+            );
+            anyhow::bail!("Signal getAttachment result was not a string or file object");
+        };
 
         let path = self.attachment_storage_path(attachment, attachment_id);
         if let Some(parent) = path.parent() {
