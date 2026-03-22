@@ -632,12 +632,13 @@ fn channel_delivery_instructions(channel_name: &str) -> Option<&'static str> {
         "whatsapp" => Some(
             "When responding on WhatsApp:\n\
              - Be concise and conversational.\n\
-             - To mention/tag someone in a group, write @<phone_number> (e.g. @85251159218). \
-               ONLY use real phone numbers from the [From: +<phone>] sender field. \
-               NEVER use numbers from [Replying to ...] headers — those may be internal \
-               WhatsApp IDs (LIDs), not real phone numbers.\n\
-             - In group chats, the conversation history includes messages from all participants. \
-               Each message shows who sent it via [From: +<phone>].\n\
+             - MENTIONING: To tag someone in a group, write @<phone_number> (e.g. @85251159218). \
+               ONLY use SHORT phone numbers (8-13 digits, typically starting with country code like 852, 86, 1). \
+               If a [From: ...] field says \"(internal ID, do NOT use for @mention)\", that number is a \
+               WhatsApp internal LID — NEVER use it for @mention. LIDs are very long (15+ digits) \
+               and will tag the wrong person or nobody. If you cannot find a real phone number \
+               for someone, simply refer to them by name instead of trying to @mention.\n\
+             - In group chats, messages show who sent them via [From: +<phone>].\n\
              - When you see [IMAGE:<path>] with [Image description: ...], an image was shared and described for you.\n\
              - SENDING IMAGES: To send an image file to the user, include [IMAGE:/full/path/to/file.ext] \
                in your text response. The system will automatically upload and send it as a WhatsApp image. \

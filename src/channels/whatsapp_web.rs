@@ -1282,10 +1282,23 @@ impl Channel for WhatsAppWebChannel {
                                     content = parts.join("\n\n");
                                 }
 
-                                // In group chats, prepend sender phone so the agent
-                                // can identify who said what and @mention them.
+                                // In group chats, prepend sender info so the agent
+                                // can identify who said what.
+                                // Mark LID-based numbers (>14 digits) so the agent
+                                // does NOT try to @mention them — they are internal
+                                // WhatsApp IDs, not real phone numbers.
                                 if Self::is_group_chat(&chat) {
-                                    content = format!("[From: {normalized}] {content}");
+                                    let digits: usize = normalized
+                                        .chars()
+                                        .filter(|c| c.is_ascii_digit())
+                                        .count();
+                                    if digits > 14 {
+                                        content = format!(
+                                            "[From: {normalized} (internal ID, do NOT use for @mention)] {content}"
+                                        );
+                                    } else {
+                                        content = format!("[From: {normalized}] {content}");
+                                    }
                                 }
 
                                 tracing::info!(
