@@ -39,6 +39,7 @@ pub mod discord_search;
 pub mod file_edit;
 pub mod file_read;
 pub mod file_write;
+pub mod gen_image;
 pub mod git_operations;
 pub mod glob_search;
 pub mod google_workspace;
@@ -118,6 +119,7 @@ pub use discord_search::DiscordSearchTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
+pub use gen_image::GenImageTool;
 pub use git_operations::GitOperationsTool;
 pub use glob_search::GlobSearchTool;
 pub use google_workspace::GoogleWorkspaceTool;
@@ -645,6 +647,12 @@ pub fn all_tools_with_runtime(
             root_config.image_gen.api_key_env.clone(),
         )));
     }
+
+    // Unified image generation tool (ComfyUI / DALL-E / Stability AI)
+    tool_arcs.push(Arc::new(GenImageTool::new(
+        root_config.image_generation.clone(),
+        workspace_dir.to_path_buf(),
+    )));
 
     if let Some(key) = composio_key {
         if !key.is_empty() {

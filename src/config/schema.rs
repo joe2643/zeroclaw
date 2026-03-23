@@ -261,6 +261,10 @@ pub struct Config {
     #[serde(default)]
     pub multimodal: MultimodalConfig,
 
+    /// Image generation configuration (`[image_generation]`).
+    #[serde(default)]
+    pub image_generation: ImageGenerationConfig,
+
     /// Web fetch tool configuration (`[web_fetch]`).
     #[serde(default)]
     pub web_fetch: WebFetchConfig,
@@ -3149,6 +3153,134 @@ impl Default for ClaudeCodeConfig {
             system_prompt: None,
             max_output_bytes: default_claude_code_max_output_bytes(),
             env_passthrough: Vec::new(),
+        }
+    }
+}
+
+// ── Image generation ────────────────────────────────────────────
+
+/// Unified image generation configuration supporting ComfyUI,
+/// DALL-E, or Stability AI.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ImageGenerationConfig {
+    /// Default backend for image generation. Values: `"comfyui"`, `"dalle"`, `"stability"`.
+    #[serde(default = "default_image_gen_backend")]
+    pub default_backend: String,
+    #[serde(default)]
+    pub comfyui: ComfyUiBackendConfig,
+    #[serde(default)]
+    pub dalle: DalleBackendConfig,
+    #[serde(default)]
+    pub stability: StabilityBackendConfig,
+}
+
+fn default_image_gen_backend() -> String {
+    "comfyui".into()
+}
+
+impl Default for ImageGenerationConfig {
+    fn default() -> Self {
+        Self {
+            default_backend: default_image_gen_backend(),
+            comfyui: ComfyUiBackendConfig::default(),
+            dalle: DalleBackendConfig::default(),
+            stability: StabilityBackendConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ComfyUiBackendConfig {
+    #[serde(default = "default_comfyui_host")]
+    pub host: String,
+    #[serde(default = "default_comfyui_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub checkpoint: String,
+    #[serde(default)]
+    pub workflow_path: String,
+    #[serde(default = "default_comfyui_steps")]
+    pub steps: u32,
+    #[serde(default = "default_comfyui_cfg")]
+    pub cfg: f32,
+    #[serde(default = "default_comfyui_width")]
+    pub width: u32,
+    #[serde(default = "default_comfyui_height")]
+    pub height: u32,
+}
+
+fn default_comfyui_host() -> String {
+    "127.0.0.1".into()
+}
+fn default_comfyui_port() -> u16 {
+    8189
+}
+fn default_comfyui_steps() -> u32 {
+    25
+}
+fn default_comfyui_cfg() -> f32 {
+    7.0
+}
+fn default_comfyui_width() -> u32 {
+    1024
+}
+fn default_comfyui_height() -> u32 {
+    1024
+}
+
+impl Default for ComfyUiBackendConfig {
+    fn default() -> Self {
+        Self {
+            host: default_comfyui_host(),
+            port: default_comfyui_port(),
+            checkpoint: String::new(),
+            workflow_path: String::new(),
+            steps: default_comfyui_steps(),
+            cfg: default_comfyui_cfg(),
+            width: default_comfyui_width(),
+            height: default_comfyui_height(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DalleBackendConfig {
+    #[serde(default = "default_dalle_backend_api_key_env")]
+    pub api_key_env: String,
+    #[serde(default = "default_dalle_backend_model")]
+    pub model: String,
+}
+
+fn default_dalle_backend_api_key_env() -> String {
+    "OPENAI_API_KEY".into()
+}
+fn default_dalle_backend_model() -> String {
+    "dall-e-3".into()
+}
+
+impl Default for DalleBackendConfig {
+    fn default() -> Self {
+        Self {
+            api_key_env: default_dalle_backend_api_key_env(),
+            model: default_dalle_backend_model(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct StabilityBackendConfig {
+    #[serde(default = "default_stability_backend_api_key_env")]
+    pub api_key_env: String,
+}
+
+fn default_stability_backend_api_key_env() -> String {
+    "STABILITY_API_KEY".into()
+}
+
+impl Default for StabilityBackendConfig {
+    fn default() -> Self {
+        Self {
+            api_key_env: default_stability_backend_api_key_env(),
         }
     }
 }
@@ -7161,6 +7293,7 @@ impl Default for Config {
             browser_delegate: crate::tools::browser_delegate::BrowserDelegateConfig::default(),
             http_request: HttpRequestConfig::default(),
             multimodal: MultimodalConfig::default(),
+            image_generation: ImageGenerationConfig::default(),
             web_fetch: WebFetchConfig::default(),
             link_enricher: LinkEnricherConfig::default(),
             text_browser: TextBrowserConfig::default(),
@@ -10143,6 +10276,7 @@ default_temperature = 0.7
             browser_delegate: crate::tools::browser_delegate::BrowserDelegateConfig::default(),
             http_request: HttpRequestConfig::default(),
             multimodal: MultimodalConfig::default(),
+            image_generation: ImageGenerationConfig::default(),
             web_fetch: WebFetchConfig::default(),
             link_enricher: LinkEnricherConfig::default(),
             text_browser: TextBrowserConfig::default(),
@@ -10660,6 +10794,7 @@ default_temperature = 0.7
             browser_delegate: crate::tools::browser_delegate::BrowserDelegateConfig::default(),
             http_request: HttpRequestConfig::default(),
             multimodal: MultimodalConfig::default(),
+            image_generation: ImageGenerationConfig::default(),
             web_fetch: WebFetchConfig::default(),
             link_enricher: LinkEnricherConfig::default(),
             text_browser: TextBrowserConfig::default(),
