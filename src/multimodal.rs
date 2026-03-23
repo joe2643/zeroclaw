@@ -191,7 +191,7 @@ fn compose_multimodal_message(text: &str, data_uris: &[String]) -> String {
     content
 }
 
-async fn normalize_image_reference(
+pub(crate) async fn normalize_image_reference(
     source: &str,
     config: &MultimodalConfig,
     max_bytes: usize,

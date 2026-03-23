@@ -1447,6 +1447,12 @@ pub struct MultimodalConfig {
     /// Only used when `vision_provider` is set.
     #[serde(default)]
     pub vision_model: Option<String>,
+    /// MCP server name to use as a vision fallback when the active provider
+    /// does not support vision input.  When set, image markers are converted
+    /// to text descriptions via this MCP server instead of rejecting the
+    /// request outright.  Example: `"zai-vision"`.
+    #[serde(default)]
+    pub vision_mcp_fallback: Option<String>,
 }
 
 fn default_multimodal_max_images() -> usize {
@@ -1474,6 +1480,7 @@ impl Default for MultimodalConfig {
             allow_remote_fetch: false,
             vision_provider: None,
             vision_model: None,
+            vision_mcp_fallback: None,
         }
     }
 }

@@ -73,6 +73,7 @@ pub mod project_intel;
 pub mod proxy_config;
 pub mod pushover;
 pub mod reaction;
+pub mod read_image;
 pub mod read_skill;
 pub mod report_templates;
 pub mod schedule;
